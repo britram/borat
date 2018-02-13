@@ -2,10 +2,14 @@ package borat
 
 import (
 	"encoding/binary"
+	"fmt"
 	"io"
 	"math"
 	"reflect"
 	"sort"
+	"strconv"
+	"strings"
+	"time"
 )
 
 // CBORWriter writes CBOR to an output stream. It provides a relatively
@@ -14,6 +18,12 @@ import (
 // properly encode arbitrary objects as CBOR.
 type CBORWriter struct {
 	out io.Writer
+}
+
+func NewCBORWriter(out io.Writer) *CBORWriter {
+	w := new(CBORWriter)
+	w.out = out
+	return w
 }
 
 const (
@@ -116,6 +126,14 @@ func (w *CBORWriter) WriteBool(b bool) error {
 
 	_, err := w.out.Write(out)
 	return err
+}
+
+func (w *CBORWriter) WriteTimeNumeric(t time.Time) error {
+	if err := w.WriteTag(TagDateTimeEpoch); err != nil {
+		return err
+	}
+
+	return w.WriteInt(int(t.Unix()))
 }
 
 // WriteNil writes a nil to the output stream
@@ -227,18 +245,128 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		return w.WriteString(v.String())
 	case reflect.Slice:
 		// treat byte slices specially
-		if v.Type().Elem() == reflect.TypeOf([]byte{}) {
+		if v.Type() == reflect.TypeOf([]byte{}) {
 			return w.WriteBytes(v.Bytes())
 		} else {
 			return w.WriteArray(v.Interface().([]interface{}))
 		}
+	case reflect.Array:
+		// FIXME basically, treat these as fixed-length slices...
+		panic("array marshaling not yet supported")
 	case reflect.Struct:
-		// this is a struct type that can't marshal itself.
-		// first try struct tags, then guess.
-		panic("work pointer")
+		// treat times sepcially
+		if v.Type() == reflect.TypeOf(time.Time{}) {
+			return w.WriteTimeNumeric(v.Interface().(time.Time))
+		} else {
+			return w.writeReflectedStruct(v)
+		}
+	default:
 	}
 
 	return nil
+}
+
+type structFieldKeyMap struct {
+	intKeyForField map[string]int
+	strKeyForField map[string]string
+}
+
+func (sfk *structFieldKeyMap) usingIntKeys() bool {
+	return sfk.intKeyForField != nil
+}
+
+func (sfk *structFieldKeyMap) learnStruct(t reflect.Type) {
+	for i, n := 0, t.NumField(); i < n; i++ {
+		f := t.Field(i)
+
+		// only process fields that are exportable
+		if f.PkgPath == "" {
+			// check for a struct tag
+			tag := f.Tag.Get("cbor")
+			if tag != "" {
+				// generate map key from tag
+				if strings.HasPrefix(tag, "#") {
+					// Integer tag; parse it
+					intKey, err := strconv.Atoi(tag[1:len(tag)])
+					if err != nil {
+						panic(fmt.Sprintf("invalid integer key tag for %s.%s", t.Name(), f.Name))
+					}
+					if sfk.strKeyForField != nil {
+						panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
+					}
+					if sfk.intKeyForField == nil {
+						sfk.intKeyForField = make(map[string]int)
+					}
+					sfk.intKeyForField[f.Name] = intKey
+				} else {
+					if sfk.intKeyForField != nil {
+						panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
+					}
+					if sfk.strKeyForField == nil {
+						sfk.strKeyForField = make(map[string]string)
+					}
+					sfk.strKeyForField[f.Name] = tag
+				}
+			} else {
+				// generate map key from name
+				if sfk.intKeyForField != nil {
+					panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
+				}
+				if sfk.strKeyForField == nil {
+					sfk.strKeyForField = make(map[string]string)
+				}
+				sfk.strKeyForField[f.Name] = f.Name
+			}
+		}
+	}
+}
+
+func (sfk *structFieldKeyMap) convertStructToIntMap(v reflect.Value) map[int]interface{} {
+	if sfk.intKeyForField == nil {
+		panic(fmt.Sprintf("can't convert %s to integer-keyed map", v.Type().Name()))
+	}
+
+	out := make(map[int]interface{})
+
+	for i, n := 0, v.NumField(); i < n; i++ {
+		fieldName := v.Type().Field(i).Name
+		fieldVal := v.Field(i)
+		out[sfk.intKeyForField[fieldName]] = fieldVal.Interface()
+	}
+
+	return out
+}
+
+func (sfk *structFieldKeyMap) convertStructToStringMap(v reflect.Value) map[string]interface{} {
+	if sfk.strKeyForField == nil {
+		panic(fmt.Sprintf("can't convert %s to string-keyed map", v.Type().Name()))
+	}
+
+	out := make(map[string]interface{})
+
+	for i, n := 0, v.NumField(); i < n; i++ {
+		fieldName := v.Type().Field(i).Name
+		fieldVal := v.Field(i)
+		out[sfk.strKeyForField[fieldName]] = fieldVal.Interface()
+	}
+
+	return out
+}
+
+func (w *CBORWriter) writeReflectedStruct(v reflect.Value) error {
+
+	// FIXME we probably want to cache this
+	// Generate map containing serialization names for fields
+	var sfk structFieldKeyMap
+	sfk.learnStruct(v.Type())
+
+	// and write either an int map or a string map
+	if sfk.usingIntKeys() {
+		return w.WriteIntMap(sfk.convertStructToIntMap(v))
+	} else {
+		return w.WriteStringMap(sfk.convertStructToStringMap(v))
+	}
+
 }
 
 // CBORMarshaler represents an object that can write itself to a CBORWriter
