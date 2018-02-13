@@ -81,7 +81,7 @@ func TestWriteArray(t *testing.T) {
 		w.WriteArray(testPatterns[i].value)
 
 		if bytes.Compare(buf.Bytes(), testPatterns[i].cbor) != 0 {
-			t.Errorf("error writing %s: expected %v, got %v",
+			t.Errorf("error writing %v: expected %v, got %v",
 				testPatterns[i].value, testPatterns[i].cbor, buf.Bytes())
 		}
 	}
@@ -150,7 +150,7 @@ func TestWriteStructs(t *testing.T) {
 		w.Marshal(testPatterns[i].value)
 
 		if bytes.Compare(buf.Bytes(), testPatterns[i].cbor) != 0 {
-			t.Errorf("error writing %s: expected %v, got %v",
+			t.Errorf("error writing %v: expected %v, got %v",
 				testPatterns[i].value, testPatterns[i].cbor, buf.Bytes())
 		}
 	}
