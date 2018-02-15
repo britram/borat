@@ -20,6 +20,8 @@ type CBORWriter struct {
 	out io.Writer
 }
 
+// NewCBORWriter creates a new CBORWriter around a given output stream
+// (io.Writer).
 func NewCBORWriter(out io.Writer) *CBORWriter {
 	w := new(CBORWriter)
 	w.out = out
@@ -226,7 +228,6 @@ func (w *CBORWriter) WriteIntMap(m map[int]interface{}) error {
 // If the object is a struct without CBOR struct tags, the struct will be
 // marshaled as a map of strings to objects using the names of the public
 // members of the struct.
-//
 func (w *CBORWriter) Marshal(x interface{}) error {
 
 	v := reflect.ValueOf(x)
@@ -251,8 +252,11 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 			return w.WriteArray(v.Interface().([]interface{}))
 		}
 	case reflect.Array:
-		// FIXME basically, treat these as fixed-length slices...
-		panic("array marshaling not yet supported")
+		s := make([]interface{}, v.Len())
+		for i := 0; i < v.Len(); i++ {
+			s[i] = v.Elem().Interface()
+		}
+		return w.WriteArray(s)
 	case reflect.Struct:
 		// treat times sepcially
 		if v.Type() == reflect.TypeOf(time.Time{}) {
