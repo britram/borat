@@ -9,6 +9,8 @@ const (
 	TagUUID           = 37
 )
 
+type CBORTag uint
+
 const (
 	majorUnsigned = 0x00
 	majorNegative = 0x20

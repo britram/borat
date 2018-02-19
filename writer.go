@@ -51,8 +51,8 @@ func (w *CBORWriter) writeBasicInt(u uint, mt byte) error {
 }
 
 // WriteTag writes a CBOR tag to the output stream. CBOR tags are used to note the semantics of the following object.
-func (w *CBORWriter) WriteTag(t uint) error {
-	return w.writeBasicInt(t, majorTag)
+func (w *CBORWriter) WriteTag(t CBORTag) error {
+	return w.writeBasicInt(uint(t), majorTag)
 }
 
 // WriteInt writes an integer to the output stream.
@@ -125,7 +125,7 @@ func (w *CBORWriter) WriteNil() error {
 	return err
 }
 
-// WriteArray writes an arbitrary array to the output stream. Each of the
+// WriteArray writes an arbitrary slice to the output stream. Each of the
 // elements of the array will be reflected and written as appropriate.
 func (w *CBORWriter) WriteArray(a []interface{}) error {
 	if err := w.writeBasicInt(uint(len(a)), majorArray); err != nil {
@@ -134,6 +134,36 @@ func (w *CBORWriter) WriteArray(a []interface{}) error {
 
 	for i := range a {
 		if err := w.Marshal(a[i]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// WriteStringArray writes a slice of strings to the output stream.
+func (w *CBORWriter) WriteStringArray(a []string) error {
+	if err := w.writeBasicInt(uint(len(a)), majorArray); err != nil {
+		return err
+	}
+
+	for i := range a {
+		if err := w.WriteString(a[i]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// WriteIntArray writes a slice of integers to the output stream.
+func (w *CBORWriter) WriteIntArray(a []int) error {
+	if err := w.writeBasicInt(uint(len(a)), majorArray); err != nil {
+		return err
+	}
+
+	for i := range a {
+		if err := w.WriteInt(a[i]); err != nil {
 			return err
 		}
 	}
@@ -226,9 +256,14 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		return w.WriteString(v.String())
 	case reflect.Slice:
 		// treat byte slices specially
-		if v.Type() == reflect.TypeOf([]byte{}) {
+		switch v.Type() {
+		case reflect.TypeOf([]byte{}):
 			return w.WriteBytes(v.Bytes())
-		} else {
+		case reflect.TypeOf([]string{}):
+			return w.WriteStringArray(v.Interface().([]string))
+		case reflect.TypeOf([]int{}):
+			return w.WriteIntArray(v.Interface().([]int))
+		default:
 			return w.WriteArray(v.Interface().([]interface{}))
 		}
 	case reflect.Array:
@@ -250,16 +285,18 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 	return nil
 }
 
-type structFieldKeyMap struct {
+type structCBORSpec struct {
+	tag            uint
+	hasTag         bool
 	intKeyForField map[string]int
 	strKeyForField map[string]string
 }
 
-func (sfk *structFieldKeyMap) usingIntKeys() bool {
-	return sfk.intKeyForField != nil
+func (scs *structCBORSpec) usingIntKeys() bool {
+	return scs.intKeyForField != nil
 }
 
-func (sfk *structFieldKeyMap) learnStruct(t reflect.Type) {
+func (scs *structCBORSpec) learnStruct(t reflect.Type) {
 	for i, n := 0, t.NumField(); i < n; i++ {
 		f := t.Field(i)
 
@@ -275,38 +312,50 @@ func (sfk *structFieldKeyMap) learnStruct(t reflect.Type) {
 					if err != nil {
 						panic(fmt.Sprintf("invalid integer key tag for %s.%s", t.Name(), f.Name))
 					}
-					if sfk.strKeyForField != nil {
+					if scs.strKeyForField != nil {
 						panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
 					}
-					if sfk.intKeyForField == nil {
-						sfk.intKeyForField = make(map[string]int)
+					if scs.intKeyForField == nil {
+						scs.intKeyForField = make(map[string]int)
 					}
-					sfk.intKeyForField[f.Name] = intKey
+					scs.intKeyForField[f.Name] = intKey
 				} else {
-					if sfk.intKeyForField != nil {
+					if scs.intKeyForField != nil {
 						panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
 					}
-					if sfk.strKeyForField == nil {
-						sfk.strKeyForField = make(map[string]string)
+					if scs.strKeyForField == nil {
+						scs.strKeyForField = make(map[string]string)
 					}
-					sfk.strKeyForField[f.Name] = tag
+					scs.strKeyForField[f.Name] = tag
 				}
 			} else {
 				// generate map key from name
-				if sfk.intKeyForField != nil {
+				if scs.intKeyForField != nil {
 					panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
 				}
-				if sfk.strKeyForField == nil {
-					sfk.strKeyForField = make(map[string]string)
+				if scs.strKeyForField == nil {
+					scs.strKeyForField = make(map[string]string)
 				}
-				sfk.strKeyForField[f.Name] = f.Name
+				scs.strKeyForField[f.Name] = f.Name
+			}
+		} else if f.Name == "cborTag" {
+			// structure indicates it would like to be tagged
+			tag := f.Tag.Get("cbor")
+			if tag != "" {
+				// parse tag value as a base-10 int
+				ct, err := strconv.Atoi(tag)
+				if err != nil || ct < 0 {
+					panic(fmt.Sprintf("cannot parse special struct member cborTag %s in %s", tag, t.Name()))
+				}
+				scs.tag = uint(ct)
+				scs.hasTag = true
 			}
 		}
 	}
 }
 
-func (sfk *structFieldKeyMap) convertStructToIntMap(v reflect.Value) map[int]interface{} {
-	if sfk.intKeyForField == nil {
+func (scs *structCBORSpec) convertStructToIntMap(v reflect.Value) map[int]interface{} {
+	if scs.intKeyForField == nil {
 		panic(fmt.Sprintf("can't convert %s to integer-keyed map", v.Type().Name()))
 	}
 
@@ -315,14 +364,14 @@ func (sfk *structFieldKeyMap) convertStructToIntMap(v reflect.Value) map[int]int
 	for i, n := 0, v.NumField(); i < n; i++ {
 		fieldName := v.Type().Field(i).Name
 		fieldVal := v.Field(i)
-		out[sfk.intKeyForField[fieldName]] = fieldVal.Interface()
+		out[scs.intKeyForField[fieldName]] = fieldVal.Interface()
 	}
 
 	return out
 }
 
-func (sfk *structFieldKeyMap) convertStructToStringMap(v reflect.Value) map[string]interface{} {
-	if sfk.strKeyForField == nil {
+func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]interface{} {
+	if scs.strKeyForField == nil {
 		panic(fmt.Sprintf("can't convert %s to string-keyed map", v.Type().Name()))
 	}
 
@@ -331,7 +380,7 @@ func (sfk *structFieldKeyMap) convertStructToStringMap(v reflect.Value) map[stri
 	for i, n := 0, v.NumField(); i < n; i++ {
 		fieldName := v.Type().Field(i).Name
 		fieldVal := v.Field(i)
-		out[sfk.strKeyForField[fieldName]] = fieldVal.Interface()
+		out[scs.strKeyForField[fieldName]] = fieldVal.Interface()
 	}
 
 	return out
@@ -341,14 +390,14 @@ func (w *CBORWriter) writeReflectedStruct(v reflect.Value) error {
 
 	// FIXME we probably want to cache this
 	// Generate map containing serialization names for fields
-	var sfk structFieldKeyMap
-	sfk.learnStruct(v.Type())
+	var scs structCBORSpec
+	scs.learnStruct(v.Type())
 
 	// and write either an int map or a string map
-	if sfk.usingIntKeys() {
-		return w.WriteIntMap(sfk.convertStructToIntMap(v))
+	if scs.usingIntKeys() {
+		return w.WriteIntMap(scs.convertStructToIntMap(v))
 	} else {
-		return w.WriteStringMap(sfk.convertStructToStringMap(v))
+		return w.WriteStringMap(scs.convertStructToStringMap(v))
 	}
 
 }
