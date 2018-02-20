@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 )
 
 var ShortReadError error
@@ -423,6 +424,60 @@ func (r *CBORReader) Read() (interface{}, error) {
 // in the value pointed to by v, according to v's type. Returns
 // CBORTypeReadError if the type does not match or cannot be made to match.
 // Values are handled as in Marshal().
-func (r *CBORReader) Unmarshal(v interface{}) error {
-	panic("not yet implemented")
+func (r *CBORReader) Unmarshal(x interface{}) error {
+
+	pv := reflect.ValueOf(x)
+
+	// make sure we have a pointer to a thing
+	if pv.Kind() != reflect.Ptr || pv.IsNil() {
+		return fmt.Errorf("cannot unmarshal CBOR to non-pointer type %v", pv.Type())
+	}
+
+	// if the type implements unmarshaler, just do that
+	if pv.Type().Elem().Implements(reflect.TypeOf((*CBORMarshaler)(nil)).Elem()) {
+		return pv.Elem().Interface().(CBORUnmarshaler).UnmarshalCBOR(r)
+	}
+
+	// otherwise, read value based on value's element kind
+	switch pv.Elem().Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		i, err := r.ReadInt()
+		if err != nil {
+			return err
+		}
+		pv.Elem().SetInt(int64(i))
+		return nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		i, err := r.ReadInt()
+		if err != nil {
+			return err
+		}
+		pv.Elem().SetUint(uint64(i))
+		return nil
+	case reflect.String:
+		s, err := r.ReadString()
+		if err != nil {
+			return err
+		}
+		pv.Elem().SetString(s)
+		return nil
+	case reflect.Slice:
+		// Work Pointer
+		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+	case reflect.Array:
+		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+
+	case reflect.Struct:
+		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+
+	case reflect.Bool:
+		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+
+	default:
+		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+	}
+}
+
+type CBORUnmarshaler interface {
+	UnmarshalCBOR(r *CBORReader) error
 }
