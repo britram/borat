@@ -110,7 +110,8 @@ func (w *CBORWriter) WriteBool(b bool) error {
 	return err
 }
 
-func (w *CBORWriter) WriteTimeNumeric(t time.Time) error {
+func (w *CBORWriter) WriteTime(t time.Time) error {
+	// FIXME use writer prefs to determine whether this gets written as a int, float, or string.
 	if err := w.WriteTag(TagDateTimeEpoch); err != nil {
 		return err
 	}
@@ -275,7 +276,7 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 	case reflect.Struct:
 		// treat times sepcially
 		if v.Type() == reflect.TypeOf(time.Time{}) {
-			return w.WriteTimeNumeric(v.Interface().(time.Time))
+			return w.WriteTime(v.Interface().(time.Time))
 		} else {
 			return w.writeReflectedStruct(v)
 		}

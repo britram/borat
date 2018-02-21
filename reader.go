@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"time"
 )
 
 var ShortReadError error
@@ -358,6 +359,12 @@ func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 	return out, nil
 }
 
+func (r *CBORReader) ReadTime() (time.Time, error) {
+	// check for a tag and consume it; otherwise just interpret a number, float, or string as if it were tagged.
+	// FIXME write this
+	panic("not yet implemented")
+}
+
 // Read reads the next value as an arbitrary object from the CBOR reader. It
 // returns a single interface{} of one of the following types, depending on the
 // major type of the next CBOR object in the stream:
@@ -438,6 +445,11 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 		return pv.Elem().Interface().(CBORUnmarshaler).UnmarshalCBOR(r)
 	}
 
+	// make sure the thing is settable
+	if !pv.Elem().CanSet() {
+		return fmt.Errorf("cannot unmarshal CBOR to type %v: not settable by reflection", pv.Type())
+	}
+
 	// otherwise, read value based on value's element kind
 	switch pv.Elem().Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -462,20 +474,59 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 		pv.Elem().SetString(s)
 		return nil
 	case reflect.Slice:
-		// Work Pointer
-		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+		switch pv.Elem().Type() {
+		case reflect.TypeOf([]string{}):
+			sl, err := r.ReadStringArray()
+			if err != nil {
+				return err
+			}
+			pv.Elem().Set(reflect.ValueOf(sl))
+			return nil
+		case reflect.TypeOf([]int{}):
+			sl, err := r.ReadIntArray()
+			if err != nil {
+				return err
+			}
+			pv.Elem().Set(reflect.ValueOf(sl))
+			return nil
+		default:
+			sl, err := r.ReadArray()
+			if err != nil {
+				return err
+			}
+			pv.Elem().Set(reflect.ValueOf(sl))
+			return nil
+		}
 	case reflect.Array:
 		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
-
 	case reflect.Struct:
-		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
-
+		// treat times sepcially
+		if pv.Elem().Type() == reflect.TypeOf(time.Time{}) {
+			t, err := r.ReadTime()
+			if err != nil {
+				return err
+			}
+			pv.Elem().Set(reflect.ValueOf(t))
+			return nil
+		} else {
+			return r.readReflectedStruct(pv)
+		}
 	case reflect.Bool:
-		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
-
-	default:
-		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+		b, err := r.Read()
+		if err != nil {
+			return err
+		}
+		switch b.(type) {
+		case bool:
+			pv.Elem().Set(reflect.ValueOf(b))
+		}
 	}
+
+	return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+}
+
+func (r *CBORReader) readReflectedStruct(pv reflect.Value) error {
+	return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
 }
 
 type CBORUnmarshaler interface {
