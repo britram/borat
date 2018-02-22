@@ -23,8 +23,10 @@ type CBORWriter struct {
 // NewCBORWriter creates a new CBORWriter around a given output stream
 // (io.Writer).
 func NewCBORWriter(out io.Writer) *CBORWriter {
-	w := new(CBORWriter)
-	w.out = out
+	w := &CBORWriter{
+		out:      out,
+		scsCache: make(map[reflect.Type]*structCBORSpec),
+	}
 	return w
 }
 
