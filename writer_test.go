@@ -7,6 +7,17 @@ import (
 	"github.com/britram/borat"
 )
 
+func cborTestHarness(t *testing.T, in interface{}, expected []byte, marshaler func(interface{}, *bytes.Buffer)) {
+	var buf bytes.Buffer
+
+	marshaler(in, &buf)
+
+	if bytes.Compare(buf.Bytes(), expected) != 0 {
+		t.Errorf("error writing %v: expected %v, got %v",
+			in, expected, buf.Bytes())
+	}
+}
+
 func TestWriteIntegers(t *testing.T) {
 	testPatterns := []struct {
 		value int
@@ -23,17 +34,11 @@ func TestWriteIntegers(t *testing.T) {
 	}
 
 	for i := range testPatterns {
-
-		var buf bytes.Buffer
-
-		w := borat.NewCBORWriter(&buf)
-
-		w.WriteInt(testPatterns[i].value)
-
-		if bytes.Compare(buf.Bytes(), testPatterns[i].cbor) != 0 {
-			t.Errorf("error writing %d: expected %v, got %v",
-				testPatterns[i].value, testPatterns[i].cbor, buf.Bytes())
+		m := func(in interface{}, out *bytes.Buffer) {
+			w := borat.NewCBORWriter(out)
+			w.WriteInt(in.(int))
 		}
+		cborTestHarness(t, testPatterns[i].value, testPatterns[i].cbor, m)
 	}
 }
 
@@ -47,17 +52,11 @@ func TestWriteStrings(t *testing.T) {
 	}
 
 	for i := range testPatterns {
-
-		var buf bytes.Buffer
-
-		w := borat.NewCBORWriter(&buf)
-
-		w.WriteString(testPatterns[i].value)
-
-		if bytes.Compare(buf.Bytes(), testPatterns[i].cbor) != 0 {
-			t.Errorf("error writing %s: expected %v, got %v",
-				testPatterns[i].value, testPatterns[i].cbor, buf.Bytes())
+		m := func(in interface{}, out *bytes.Buffer) {
+			w := borat.NewCBORWriter(out)
+			w.WriteString(in.(string))
 		}
+		cborTestHarness(t, testPatterns[i].value, testPatterns[i].cbor, m)
 	}
 }
 
@@ -70,20 +69,18 @@ func TestWriteArray(t *testing.T) {
 			[]interface{}{"hello", "höi", "ciao"},
 			[]byte{0x83, 0x65, 0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x64, 0x68, 0xc3, 0xb6, 0x69, 0x64, 0x63, 0x69, 0x61, 0x6f},
 		},
+		{
+			[]interface{}{314159, 271828},
+			[]byte{0x82, 0x1A, 0x00, 0x04, 0xCB, 0x2F, 0x1A, 0x00, 0x04, 0x25, 0xD4},
+		},
 	}
 
 	for i := range testPatterns {
-
-		var buf bytes.Buffer
-
-		w := borat.NewCBORWriter(&buf)
-
-		w.WriteArray(testPatterns[i].value)
-
-		if bytes.Compare(buf.Bytes(), testPatterns[i].cbor) != 0 {
-			t.Errorf("error writing %v: expected %v, got %v",
-				testPatterns[i].value, testPatterns[i].cbor, buf.Bytes())
+		m := func(in interface{}, out *bytes.Buffer) {
+			w := borat.NewCBORWriter(out)
+			w.WriteArray(in.([]interface{}))
 		}
+		cborTestHarness(t, testPatterns[i].value, testPatterns[i].cbor, m)
 	}
 }
 
