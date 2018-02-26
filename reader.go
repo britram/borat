@@ -84,6 +84,8 @@ func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
 		}
 	}
 
+	// Type of < 23 is used for storing small integers directly.
+	// 24 - 27 represent 1, 2, 4, or 8 byte integers respectively.
 	var u uint64
 	switch {
 	case ct&majorMask < 23:
@@ -360,9 +362,37 @@ func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 }
 
 func (r *CBORReader) ReadTime() (time.Time, error) {
-	// check for a tag and consume it; otherwise just interpret a number, float, or string as if it were tagged.
-	// FIXME write this
-	panic("not yet implemented")
+	// TODO: check for a tag and consume it; otherwise just interpret a number, float, or string as if it were tagged.
+	// At the moment only tagged values are supported.
+	tag, err := r.ReadTag()
+	if err != nil {
+		return time.Unix(0, 0), err
+	}
+	// Two tags are allowed: 0 for RFC3339 time, 1 for POSIX epoch time.
+	switch tag {
+	case TagDateTimeString:
+		return time.Unix(0, 0), fmt.Errorf("TagDateTimeString unsupported")
+	case TagDateTimeEpoch:
+		ct, err := r.readType()
+		if err != nil {
+			return time.Unix(0, 0), err
+		}
+		switch ct & majorMask {
+		case majorNegative:
+			fallthrough
+		case majorUnsigned:
+			r.pushbackType(ct)
+			if i, err := r.ReadInt(); err != nil {
+				return time.Unix(0, 0), err
+			} else {
+				return time.Unix(int64(i), 0), nil
+			}
+		default:
+			return time.Unix(0, 0), fmt.Errorf("Malformed or unsupported floating point timestamp.")
+		}
+	default:
+		return time.Unix(0, 0), fmt.Errorf("Unrecognized time tag")
+	}
 }
 
 // Read reads the next value as an arbitrary object from the CBOR reader. It

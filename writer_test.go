@@ -3,6 +3,7 @@ package borat_test
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/britram/borat"
 )
@@ -153,6 +154,35 @@ func TestWriteStringMap(t *testing.T) {
 		m := func(in interface{}, out *bytes.Buffer) {
 			w := borat.NewCBORWriter(out)
 			w.WriteStringMap(in.(map[string]interface{}))
+		}
+		cborTestHarness(t, testPatterns[i].value, testPatterns[i].cbor, m)
+	}
+}
+
+func TestTime(t *testing.T) {
+	testPatterns := []struct {
+		value time.Time
+		cbor  []byte
+	}{
+		{
+			time.Unix(1519650657, 0),
+			[]byte{0xC1, 0x1A, 0x5A, 0x94, 0x07, 0x61},
+		},
+		{
+			time.Unix(-1519650657, 0),
+			[]byte{0xC1, 0x3A, 0x5A, 0x94, 0x07, 0x60},
+		},
+		{
+			time.Unix(0, 0),
+			[]byte{0xC1, 0x00},
+		},
+	}
+
+	// TODO: add tests for string based time format.
+	for i := range testPatterns {
+		m := func(in interface{}, out *bytes.Buffer) {
+			w := borat.NewCBORWriter(out)
+			w.WriteTime(in.(time.Time))
 		}
 		cborTestHarness(t, testPatterns[i].value, testPatterns[i].cbor, m)
 	}

@@ -10,22 +10,31 @@ import (
 	"time"
 )
 
+type DateTimePref int
+
+const (
+	DateTimePrefInt = iota
+	DateTimePrefFloat
+	DateTimePrefString
+)
+
 // CBORWriter writes CBOR to an output stream. It provides a relatively
 // low-level interface, allowing the caller to write typed data to the stream as
 // CBOR, as well as a higher-level Marshal interface which uses reflection to
 // properly encode arbitrary objects as CBOR.
 type CBORWriter struct {
-	out io.Writer
-
-	scsCache map[reflect.Type]*structCBORSpec
+	dateTimePref DateTimePref
+	out          io.Writer
+	scsCache     map[reflect.Type]*structCBORSpec
 }
 
 // NewCBORWriter creates a new CBORWriter around a given output stream
 // (io.Writer).
 func NewCBORWriter(out io.Writer) *CBORWriter {
 	w := &CBORWriter{
-		out:      out,
-		scsCache: make(map[reflect.Type]*structCBORSpec),
+		dateTimePref: DateTimePrefInt,
+		out:          out,
+		scsCache:     make(map[reflect.Type]*structCBORSpec),
 	}
 	return w
 }
@@ -113,12 +122,19 @@ func (w *CBORWriter) WriteBool(b bool) error {
 }
 
 func (w *CBORWriter) WriteTime(t time.Time) error {
-	// FIXME use writer prefs to determine whether this gets written as a int, float, or string.
-	if err := w.WriteTag(TagDateTimeEpoch); err != nil {
-		return err
+	switch w.dateTimePref {
+	case DateTimePrefInt:
+		if err := w.WriteTag(TagDateTimeEpoch); err != nil {
+			return err
+		}
+		return w.WriteInt(int(t.Unix()))
+	case DateTimePrefFloat:
+		return fmt.Errorf("Unsupported")
+	case DateTimePrefString:
+		return fmt.Errorf("Unsupported")
+	default:
+		panic("Unsupported date time preference format.")
 	}
-
-	return w.WriteInt(int(t.Unix()))
 }
 
 // WriteNil writes a nil to the output stream
