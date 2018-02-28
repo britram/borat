@@ -10,15 +10,14 @@ import (
 	"time"
 )
 
-var ShortReadError error
-var CBORTypeReadError error
-var InvalidCBORError error
-
-func init() {
-	ShortReadError = errors.New("short read")
+var (
+	ShortReadError    = errors.New("short read")
 	CBORTypeReadError = errors.New("invalid CBOR type for typed read")
-	InvalidCBORError = errors.New("invalid CBOR")
-}
+	InvalidCBORError  = errors.New("invalid CBOR")
+	// UnsupportedTypeReadError is an explicit error for types we do not support.
+	// This is different to encountering something which is not in the RFC.
+	UnsupportedTypeReadError = errors.New("unsupported type encountered in read")
+)
 
 type CBORReader struct {
 	in       io.Reader
@@ -77,7 +76,7 @@ func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
 			return 0, ct, false, CBORTypeReadError
 		}
 	} else {
-		if ct&majorMask != mt {
+		if ct&majorSelect != mt {
 			// type mismatch, push back
 			r.pushbackType(ct)
 			return 0, ct, false, CBORTypeReadError
@@ -173,6 +172,7 @@ func (r *CBORReader) ReadTag() (CBORTag, error) {
 }
 
 func (r *CBORReader) ReadFloat() (float64, error) {
+	fmt.Printf("reading float\n")
 	u, ct, _, err := r.readBasicUnsigned(majorOther)
 	if err != nil {
 		return 0, err
@@ -180,9 +180,15 @@ func (r *CBORReader) ReadFloat() (float64, error) {
 
 	var f float64
 	switch ct {
+	case majorOther | 25:
+		// FIXME: float16 is not supported right now.
+		return 0, UnsupportedTypeReadError
 	case majorOther | 26:
+		// 32 bit float.
 		f = float64(math.Float32frombits(uint32(u)))
 	case majorOther | 27:
+		// 64 bit float.
+		fmt.Printf("reading 64bit float\n")
 		f = math.Float64frombits(u)
 	default:
 		r.pushbackType(ct)
@@ -522,7 +528,7 @@ func (r *CBORReader) Read() (interface{}, error) {
 		return r.ReadTag()
 	case majorOther:
 		switch {
-		case ct == majorOther|25 || ct == majorOther|26:
+		case ct == majorOther|25 || ct == majorOther|26 || ct == majorOther|27:
 			r.pushbackType(ct)
 			return r.ReadFloat()
 		case ct == 0xf4:
