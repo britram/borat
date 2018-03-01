@@ -11,7 +11,7 @@ func cborDecoderHarness(t *testing.T, in []byte, expected interface{}) {
 	r := NewCBORReader(bytes.NewReader(in))
 	result, err := r.Read()
 	if err != nil {
-		t.Errorf("failed to decode %v: want %v, got error: %v", expected, in, err)
+		t.Errorf("failed to decode %v: input % x, got error: %v", expected, in, err)
 		return
 	}
 	if !reflect.DeepEqual(result, expected) {
@@ -162,5 +162,65 @@ func TestReadFloatSupported(t *testing.T) {
 		} else if !math.IsNaN(res.(float64)) {
 			t.Errorf("expected NaN but got %f decoding %v", res, b)
 		}
+	}
+}
+
+func TestReadString(t *testing.T) {
+	testPatterns := []struct {
+		cbor  []byte
+		value string
+	}{
+		{
+			[]byte{0x60},
+			"",
+		},
+		{
+			[]byte{0x61, 0x61},
+			"a",
+		},
+		{
+			[]byte{0x64, 0x49, 0x45, 0x54, 0x46},
+			"IETF",
+		},
+		{
+			[]byte{0x67, 0x5A, 0xC3, 0xBC, 0x72, 0x69, 0x63, 0x68},
+			"Zürich",
+		},
+	}
+	for i := range testPatterns {
+		cborDecoderHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+	}
+}
+
+func TestReadStringMap(t *testing.T) {
+	testPatterns := []struct {
+		cbor  []byte
+		value map[string]interface{}
+	}{
+		{
+			[]byte{0xA1, 0x61, 0x31, 0x01},
+			map[string]interface{}{
+				"1": uint64(1),
+			},
+		},
+		{
+			[]byte{0xA2, 0x61, 0x31, 0x0A, 0x61, 0x32, 0x19, 0x0C, 0x45},
+			map[string]interface{}{
+				"1": uint64(10),
+				"2": uint64(3141),
+			},
+		},
+		{
+			[]byte{0xA3, 0x61, 0x31, 0x0A, 0x61, 0x32, 0x62, 0x68, 0x69, 0x61,
+				0x33, 0x83, 0x01, 0x02, 0x62, 0xC3, 0x9C},
+			map[string]interface{}{
+				"1": uint64(10),
+				"2": "hi",
+				"3": []interface{}{uint64(1), uint64(2), "Ü"},
+			},
+		},
+	}
+	for i := range testPatterns {
+		cborDecoderHarness(t, testPatterns[i].cbor, testPatterns[i].value)
 	}
 }

@@ -172,7 +172,6 @@ func (r *CBORReader) ReadTag() (CBORTag, error) {
 }
 
 func (r *CBORReader) ReadFloat() (float64, error) {
-	fmt.Printf("reading float\n")
 	u, ct, _, err := r.readBasicUnsigned(majorOther)
 	if err != nil {
 		return 0, err
@@ -188,7 +187,6 @@ func (r *CBORReader) ReadFloat() (float64, error) {
 		f = float64(math.Float32frombits(uint32(u)))
 	case majorOther | 27:
 		// 64 bit float.
-		fmt.Printf("reading 64bit float\n")
 		f = math.Float64frombits(u)
 	default:
 		r.pushbackType(ct)
@@ -224,10 +222,15 @@ func (r *CBORReader) ReadString() (string, error) {
 		return "", err
 	}
 
+	// empty string special case.
+	if u == 0 {
+		return "", nil
+	}
+
 	// read u bytes and return them as a string
 	b := make([]byte, u)
 	n, err := r.in.Read(b)
-	if n != 1 {
+	if uint64(n) < u {
 		return "", ShortReadError
 	} else if err != nil {
 		return "", err
@@ -310,7 +313,7 @@ func (r *CBORReader) ReadIntArray() ([]int, error) {
 
 func (r *CBORReader) ReadStringMap() (map[string]interface{}, error) {
 	// read length
-	u, _, _, err := r.readBasicUnsigned(majorArray)
+	u, _, _, err := r.readBasicUnsigned(majorMap)
 	if err != nil {
 		return nil, err
 	}
@@ -500,9 +503,6 @@ func (r *CBORReader) Read() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("type & majorSelect: %x\n", ct&majorSelect)
-	fmt.Printf("majorUnsigned: %x\n", majorUnsigned)
 
 	switch ct & majorSelect {
 	case majorUnsigned:
