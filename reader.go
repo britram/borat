@@ -10,15 +10,14 @@ import (
 	"time"
 )
 
-var ShortReadError error
-var CBORTypeReadError error
-var InvalidCBORError error
-
-func init() {
-	ShortReadError = errors.New("short read")
+var (
+	ShortReadError    = errors.New("short read")
 	CBORTypeReadError = errors.New("invalid CBOR type for typed read")
-	InvalidCBORError = errors.New("invalid CBOR")
-}
+	InvalidCBORError  = errors.New("invalid CBOR")
+	// UnsupportedTypeReadError is an explicit error for types we do not support.
+	// This is different to encountering something which is not in the RFC.
+	UnsupportedTypeReadError = errors.New("unsupported type encountered in read")
+)
 
 type CBORReader struct {
 	in       io.Reader
@@ -66,7 +65,7 @@ func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
 	// check for negative if this is a straight integer
 	var neg bool
 	if mt == majorUnsigned {
-		switch ct & majorMask {
+		switch ct & majorSelect {
 		case majorUnsigned:
 			neg = false
 		case majorNegative:
@@ -77,16 +76,18 @@ func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
 			return 0, ct, false, CBORTypeReadError
 		}
 	} else {
-		if ct&majorMask != mt {
+		if ct&majorSelect != mt {
 			// type mismatch, push back
 			r.pushbackType(ct)
 			return 0, ct, false, CBORTypeReadError
 		}
 	}
 
+	// Type of <= 23 is used for storing small integers directly.
+	// 24 - 27 represent 1, 2, 4, or 8 byte integers respectively.
 	var u uint64
 	switch {
-	case ct&majorMask < 23:
+	case ct&majorMask <= 23:
 		u = uint64(ct & majorMask)
 
 	case ct&majorMask == 24:
@@ -153,6 +154,14 @@ func (r *CBORReader) ReadInt() (int, error) {
 	return i, nil
 }
 
+func (r *CBORReader) ReadUint() (uint64, error) {
+	if u, _, _, err := r.readBasicUnsigned(majorUnsigned); err != nil {
+		return 0, err
+	} else {
+		return u, nil
+	}
+}
+
 func (r *CBORReader) ReadTag() (CBORTag, error) {
 	u, _, _, err := r.readBasicUnsigned(majorTag)
 	if err != nil {
@@ -170,9 +179,14 @@ func (r *CBORReader) ReadFloat() (float64, error) {
 
 	var f float64
 	switch ct {
+	case majorOther | 25:
+		// FIXME: float16 is not supported right now.
+		return 0, UnsupportedTypeReadError
 	case majorOther | 26:
+		// 32 bit float.
 		f = float64(math.Float32frombits(uint32(u)))
 	case majorOther | 27:
+		// 64 bit float.
 		f = math.Float64frombits(u)
 	default:
 		r.pushbackType(ct)
@@ -208,10 +222,15 @@ func (r *CBORReader) ReadString() (string, error) {
 		return "", err
 	}
 
+	// empty string special case.
+	if u == 0 {
+		return "", nil
+	}
+
 	// read u bytes and return them as a string
 	b := make([]byte, u)
 	n, err := r.in.Read(b)
-	if n != 1 {
+	if uint64(n) < u {
 		return "", ShortReadError
 	} else if err != nil {
 		return "", err
@@ -294,7 +313,7 @@ func (r *CBORReader) ReadIntArray() ([]int, error) {
 
 func (r *CBORReader) ReadStringMap() (map[string]interface{}, error) {
 	// read length
-	u, _, _, err := r.readBasicUnsigned(majorArray)
+	u, _, _, err := r.readBasicUnsigned(majorMap)
 	if err != nil {
 		return nil, err
 	}
@@ -360,9 +379,107 @@ func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 }
 
 func (r *CBORReader) ReadTime() (time.Time, error) {
-	// check for a tag and consume it; otherwise just interpret a number, float, or string as if it were tagged.
-	// FIXME write this
-	panic("not yet implemented")
+	// Case 1: the time is just a float, integer, or string.
+	// In this case we just treat it as if it were tagged.
+	ct, err := r.readType()
+	if err != nil {
+		return time.Unix(0, 0), err
+	}
+	switch ct & majorMask {
+	case majorOther:
+		if ct == majorOther|25 || ct == majorOther|26 || ct == majorOther|27 {
+			// Floating point timestamp.
+			r.pushbackType(ct)
+			f, err := r.ReadFloat()
+			if err != nil {
+				return time.Unix(0, 0), err
+			}
+			whole, frac := math.Modf(f)
+			secs := int64(whole)
+			ns := int64(frac * 10e9)
+			return time.Unix(secs, ns), nil
+		} else {
+			return time.Unix(0, 0), fmt.Errorf("got malformed majorOther type for timestamp: %x", ct)
+		}
+	case majorNegative:
+		fallthrough
+	case majorUnsigned:
+		r.pushbackType(ct)
+		i, err := r.ReadInt()
+		if err != nil {
+			return time.Unix(0, 0), err
+		}
+		return time.Unix(int64(i), 0), nil
+	case majorString:
+		r.pushbackType(ct)
+		s, err := r.ReadString()
+		if err != nil {
+			return time.Unix(0, 0), err
+		}
+		if t, err := time.Parse(time.RFC3339, s); err != nil {
+			return time.Unix(0, 0), err
+		} else {
+			return t, nil
+		}
+	case majorTag:
+		break // Fall through to the tag logic below.
+	default:
+		return time.Unix(0, 0), fmt.Errorf("Unsupported tag for parsing time: %v", ct&majorMask)
+	}
+	tag, err := r.ReadTag()
+	if err != nil {
+		return time.Unix(0, 0), err
+	}
+	// Two tags are allowed: 0 for RFC3339 time, 1 for POSIX epoch time.
+	switch tag {
+	case TagDateTimeString:
+		return time.Unix(0, 0), fmt.Errorf("TagDateTimeString unsupported")
+		s, err := r.ReadString()
+		if err != nil {
+			return time.Unix(0, 0), err
+		}
+		if t, err := time.Parse(time.RFC3339, s); err != nil {
+			return time.Unix(0, 0), err
+		} else {
+			return t, nil
+		}
+	case TagDateTimeEpoch:
+		// This representation is in POSIX timestamp format in either positive
+		// or negative integer, or floating point number.
+		ct, err := r.readType()
+		if err != nil {
+			return time.Unix(0, 0), err
+		}
+		switch ct & majorMask {
+		case majorNegative:
+			fallthrough
+		case majorUnsigned:
+			r.pushbackType(ct)
+			if i, err := r.ReadInt(); err != nil {
+				return time.Unix(0, 0), err
+			} else {
+				return time.Unix(int64(i), 0), nil
+			}
+		case majorOther:
+			if ct == majorOther|25 || ct == majorOther|26 || ct == majorOther|27 {
+				r.pushbackType(ct)
+				f, err := r.ReadFloat()
+				if err != nil {
+					return time.Unix(0, 0), err
+				}
+				whole, frac := math.Modf(f)
+				secs := int64(whole)
+				ns := int64(frac * 10e9)
+				return time.Unix(secs, ns), nil
+			} else {
+				return time.Unix(0, 0), fmt.Errorf("got malformed majorOther type for timestamp: %x", ct)
+			}
+		default:
+			return time.Unix(0, 0), fmt.Errorf("Timestamp not understood.")
+		}
+	default:
+		return time.Unix(0, 0), fmt.Errorf("Unrecognized time tag")
+	}
 }
 
 // Read reads the next value as an arbitrary object from the CBOR reader. It
@@ -387,10 +504,10 @@ func (r *CBORReader) Read() (interface{}, error) {
 		return nil, err
 	}
 
-	switch ct & majorMask {
+	switch ct & majorSelect {
 	case majorUnsigned:
 		r.pushbackType(ct)
-		return r.ReadInt()
+		return r.ReadUint()
 	case majorNegative:
 		r.pushbackType(ct)
 		return r.ReadInt()
@@ -411,7 +528,7 @@ func (r *CBORReader) Read() (interface{}, error) {
 		return r.ReadTag()
 	case majorOther:
 		switch {
-		case ct == majorOther|25 || ct == majorOther|26:
+		case ct == majorOther|25 || ct == majorOther|26 || ct == majorOther|27:
 			r.pushbackType(ct)
 			return r.ReadFloat()
 		case ct == 0xf4:

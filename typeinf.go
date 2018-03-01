@@ -21,4 +21,5 @@ const (
 	majorTag      = 0xc0
 	majorOther    = 0xe0
 	majorMask     = 0x1f
+	majorSelect   = 0xe0
 )
