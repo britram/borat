@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// structCBORSpec represents metadata for writing structures.
 type structCBORSpec struct {
 	tag            uint
 	hasTag         bool
@@ -92,6 +93,26 @@ func (scs *structCBORSpec) convertStructToIntMap(v reflect.Value) map[int]interf
 	return out
 }
 
+func (scs *structCBORSpec) convertIntMapToStruct(in map[int]interface{}, out reflect.Value) {
+	if scs.intKeyForField == nil {
+		panic(fmt.Sprintf("can't parse int map for struct type %s", out.Type().Name()))
+	}
+
+	for i, n := 0, out.NumField(); i < n; i++ {
+		fieldName := out.Type().Field(i).Name
+		mapIdx := scs.intKeyForField[fieldName]
+		// If this is a struct we should do something special here.
+		if value, ok := in[mapIdx]; ok {
+			// If this field is of type int but we have a uint64, we can cast
+			// it, provided that it fits.j w
+			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(value).Kind() == reflect.Uint64 {
+				value = int(value.(uint64))
+			}
+			out.Field(i).Set(reflect.ValueOf(value))
+		}
+	}
+}
+
 func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]interface{} {
 	if scs.strKeyForField == nil {
 		panic(fmt.Sprintf("can't convert %s to string-keyed map", v.Type().Name()))
@@ -106,4 +127,26 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]
 	}
 
 	return out
+}
+
+func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, out reflect.Value) {
+	if scs.strKeyForField == nil {
+		panic(fmt.Sprintf("cant parse string map for struct type %s", out.Type().Name()))
+	}
+
+	for i, n := 0, out.NumField(); i < n; i++ {
+		fieldName := out.Type().Field(i).Name
+		mapIdx := scs.strKeyForField[fieldName]
+		// If this is a struct we should do something special here.
+		if value, ok := in[mapIdx]; ok {
+			// If this field is of type int but we have a uint64, we can cast
+			// it, provided that it fits.j w
+			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(value).Kind() == reflect.Uint64 {
+				fmt.Printf("setting field with name: %s\n", fieldName)
+				value = int(value.(uint64))
+			}
+
+			out.Field(i).Set(reflect.ValueOf(value))
+		}
+	}
 }

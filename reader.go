@@ -433,7 +433,6 @@ func (r *CBORReader) ReadTime() (time.Time, error) {
 	// Two tags are allowed: 0 for RFC3339 time, 1 for POSIX epoch time.
 	switch tag {
 	case TagDateTimeString:
-		return time.Unix(0, 0), fmt.Errorf("TagDateTimeString unsupported")
 		s, err := r.ReadString()
 		if err != nil {
 			return time.Unix(0, 0), err
@@ -626,7 +625,7 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 			pv.Elem().Set(reflect.ValueOf(t))
 			return nil
 		} else {
-			return r.readReflectedStruct(pv)
+			return r.readReflectedStruct(pv.Elem())
 		}
 	case reflect.Bool:
 		b, err := r.Read()
@@ -642,8 +641,36 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 	return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
 }
 
+// readReflectedStruct attempts to deserialize a map from the reader that
+// matches the elements of a struct.
 func (r *CBORReader) readReflectedStruct(pv reflect.Value) error {
-	return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+	if pv.Kind() != reflect.Struct {
+		return fmt.Errorf("readReflectedStruct wants only structs, got: %v", pv.Kind())
+	}
+	scs := structCBORSpec{}
+	scs.learnStruct(pv.Type())
+
+	// Either read a string map or an int map or a tag.
+	ct, err := r.readType()
+	if err != nil {
+		return fmt.Errorf("failed to read tag: %v", err)
+	}
+
+	var m map[string]interface{}
+	switch ct & majorSelect {
+	case majorMap:
+		// Read the right kind of map depending on what the struct supports.
+		// TODO: support reading int maps.
+		r.pushbackType(ct)
+		m, err = r.ReadStringMap()
+		if err != nil {
+			return fmt.Errorf("failed to read string map for struct: %v", err)
+		}
+	case majorTag:
+		return errors.New("tagged structs are not supported yet")
+	}
+	scs.convertStringMapToStruct(m, pv)
+	return nil
 }
 
 type CBORUnmarshaler interface {
