@@ -1,4 +1,7 @@
 ## Borat
+[![Circle CI](https://circleci.com/gh/rayhaanj/borat.svg?style=shield&circle-token=:circle-token)](https://circleci.com/gh/rayhaanj/borat)
+
+
 
 *Borat* is a CBOR library for Go which supports a canonical representation.
 
