@@ -1,37 +1,11 @@
-## Welcome to GitHub Pages
+## Borat
 
-You can use the [editor on GitHub](https://github.com/rayhaanj/borat/edit/master/README.md) to maintain and preview the content for your website in Markdown files.
+*Borat* is a CBOR library for Go which supports canonical representations.
 
-Whenever you commit to this repository, GitHub Pages will run [Jekyll](https://jekyllrb.com/) to rebuild the pages in your site, from the content in your Markdown files.
+The purpose of this library is to provide CBOR functionality for [RAINS](https://github.com/netsec-ethz/rains).
 
-### Markdown
+### Supported features
 
-Markdown is a lightweight and easy-to-use syntax for styling your writing. It includes conventions for
-
-```markdown
-Syntax highlighted code block
-
-# Header 1
-## Header 2
-### Header 3
-
-- Bulleted
-- List
-
-1. Numbered
-2. List
-
-**Bold** and _Italic_ and `Code` text
-
-[Link](url) and ![Image](src)
-```
-
-For more details see [GitHub Flavored Markdown](https://guides.github.com/features/mastering-markdown/).
-
-### Jekyll Themes
-
-Your Pages site will use the layout and styles from the Jekyll theme you have selected in your [repository settings](https://github.com/rayhaanj/borat/settings). The name of this theme is saved in the Jekyll `_config.yml` configuration file.
-
-### Support or Contact
-
-Having trouble with Pages? Check out our [documentation](https://help.github.com/categories/github-pages-basics/) or [contact support](https://github.com/contact) and we’ll help you sort it out.
+* Serialize and deserialize basic types: `int`, `string`, `boolean`, `map[string]interface{}`, `map[int]interface{}`, `[]interface{}`, `struct`.
+* Support for `Go` struct tags to rename fields
+* Support for [tagged](https://tools.ietf.org/html/rfc7049#section-2.4) structs in CBOR
