@@ -1,6 +1,6 @@
 ## Borat
 
-*Borat* is a CBOR library for Go which supports canonical representations.
+*Borat* is a CBOR library for Go which supports a canonical representation.
 
 The purpose of this library is to provide CBOR functionality for [RAINS](https://github.com/netsec-ethz/rains).
 
