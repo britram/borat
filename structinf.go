@@ -104,7 +104,7 @@ func (scs *structCBORSpec) convertIntMapToStruct(in map[int]interface{}, out ref
 		// If this is a struct we should do something special here.
 		if value, ok := in[mapIdx]; ok {
 			// If this field is of type int but we have a uint64, we can cast
-			// it, provided that it fits.j w
+			// it, provided that it fits.
 			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(value).Kind() == reflect.Uint64 {
 				value = int(value.(uint64))
 			}
@@ -129,24 +129,44 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]
 	return out
 }
 
+// handleSlice sets the field referenced by out to the data in in,
+// out should be a slice of some type and in should also be a []interface{}
+func handleSlice(out reflect.Value, in interface{}) {
+	if out.Kind() != reflect.Slice {
+		panic("called handleSlice on a non-slice")
+	}
+	switch out.Type().Elem().Kind() {
+	case reflect.Uint64, reflect.String:
+		for _, e := range in.([]interface{}) {
+			out.Set(reflect.Append(out, reflect.ValueOf(e)))
+		}
+	case reflect.Slice:
+		panic("nested slices not implemented yet.")
+	}
+}
+
 func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, out reflect.Value) {
 	if scs.strKeyForField == nil {
 		panic(fmt.Sprintf("cant parse string map for struct type %s", out.Type().Name()))
 	}
-
 	for i, n := 0, out.NumField(); i < n; i++ {
 		fieldName := out.Type().Field(i).Name
 		mapIdx := scs.strKeyForField[fieldName]
 		// If this is a struct we should do something special here.
 		if value, ok := in[mapIdx]; ok {
+			fmt.Printf("setting field with name: %s\n", fieldName)
 			// If this field is of type int but we have a uint64, we can cast
-			// it, provided that it fits.j w
+			// it, provided that it fits.
 			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(value).Kind() == reflect.Uint64 {
-				fmt.Printf("setting field with name: %s\n", fieldName)
 				value = int(value.(uint64))
 			}
-
-			out.Field(i).Set(reflect.ValueOf(value))
+			if out.Field(i).Kind() == reflect.Slice {
+				handleSlice(out.Field(i), value)
+			} else if out.Field(i).Kind() == reflect.Struct {
+				scs.convertStringMapToStruct(value.(map[string]interface{}), out.Field(i))
+			} else {
+				out.Field(i).Set(reflect.ValueOf(value))
+			}
 		}
 	}
 }

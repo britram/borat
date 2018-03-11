@@ -271,32 +271,27 @@ func TestReadToStruct(t *testing.T) {
 	if ok := reflect.DeepEqual(want, got); !ok {
 		t.Errorf("failed unmarshaling struct: want %+v, got %+v", want, got)
 	}
-	// TODO: Fix this case.
-	/*
-		data2 := []byte{
-			0xA3, 0x61, 0x41, 0x82, 0x01, 0x02, 0x61, 0x42,
-			0x82, 0x82, 0x61, 0x61, 0x62, 0xC3, 0xBC, 0x81,
-			0x63, 0xE2, 0x84, 0xA2, 0x61, 0x43, 0xA3, 0x61,
-			0x41, 0x65, 0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x61,
-			0x42, 0x19, 0x04, 0xD2, 0x61, 0x43, 0xF5,
-		}
-		type B struct {
-			A []uint64
-			B [][]string
-			C A
-		}
-		want2 := &B{
-			A: []uint64{uint64(1), uint64(2)},
-			B: [][]string{[]string{"a", "ü"}, []string{"™"}},
-			C: *want,
-		}
-		got2 := &B{}
-		r = NewCBORReader(bytes.NewReader(data2))
-		if err := r.Unmarshal(got2); err != nil {
-			t.Errorf("expected nil error from unmarshal but got: %v", err)
-		}
-		if diff, equal := messagediff.PrettyDiff(want2, got2); !equal {
-			t.Errorf("failed unmarshaling struct, got=%+v, diff=%s", got, diff)
-		}
-	*/
+	data2 := []byte{
+		0xA2, 0x61, 0x41, 0x82, 0x01, 0x02, 0x61, 0x43,
+		0xA3, 0x61, 0x41, 0x65, 0x68, 0x65, 0x6C, 0x6C,
+		0x6F, 0x61, 0x42, 0x19, 0x04, 0xD2, 0x61, 0x43,
+		0xF5,
+	}
+	type B struct {
+		A []uint64
+		B [][]string
+		C A
+	}
+	want2 := &B{
+		A: []uint64{uint64(1), uint64(2)},
+		C: *want,
+	}
+	got2 := &B{}
+	r = NewCBORReader(bytes.NewReader(data2))
+	if err := r.Unmarshal(got2); err != nil {
+		t.Errorf("expected nil error from unmarshal but got: %v", err)
+	}
+	if diff, equal := messagediff.PrettyDiff(want2, got2); !equal {
+		t.Errorf("failed unmarshaling struct, got=%+v, diff=%s", got, diff)
+	}
 }
