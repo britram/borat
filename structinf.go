@@ -137,11 +137,17 @@ func handleSlice(out reflect.Value, in interface{}) {
 	}
 	switch out.Type().Elem().Kind() {
 	case reflect.Uint64, reflect.String:
-		for _, e := range in.([]interface{}) {
-			out.Set(reflect.Append(out, reflect.ValueOf(e)))
+		for i, e := range in.([]interface{}) {
+			out.Index(i).Set(reflect.ValueOf(e))
 		}
 	case reflect.Slice:
-		panic("nested slices not implemented yet.")
+		inIter := in.([]interface{})
+		for i, inElem := range inIter {
+			slen := len(inElem.([]interface{}))
+			slice := reflect.MakeSlice(out.Type().Elem(), slen, slen)
+			out.Index(i).Set(slice)
+			handleSlice(out.Index(i), inElem)
+		}
 	}
 }
 
@@ -154,14 +160,17 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, o
 		mapIdx := scs.strKeyForField[fieldName]
 		// If this is a struct we should do something special here.
 		if value, ok := in[mapIdx]; ok {
-			fmt.Printf("setting field with name: %s\n", fieldName)
 			// If this field is of type int but we have a uint64, we can cast
 			// it, provided that it fits.
 			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(value).Kind() == reflect.Uint64 {
 				value = int(value.(uint64))
 			}
 			if out.Field(i).Kind() == reflect.Slice {
-				handleSlice(out.Field(i), value)
+				// We need to make a slice with the correct length and type.
+				slen := len(value.([]interface{}))
+				slice := reflect.MakeSlice(out.Field(i).Type(), slen, slen)
+				out.Field(i).Set(slice)
+				handleSlice(out.Field(i), value) // Handle the elements of the slice.
 			} else if out.Field(i).Kind() == reflect.Struct {
 				scs.convertStringMapToStruct(value.(map[string]interface{}), out.Field(i))
 			} else {
