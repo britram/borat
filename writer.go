@@ -301,8 +301,6 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 	default:
 		return fmt.Errorf("Cannot marshal objects of type %v to CBOR", v.Type())
 	}
-
-	return nil
 }
 
 func (w *CBORWriter) writeReflectedStruct(v reflect.Value) error {
@@ -321,7 +319,6 @@ func (w *CBORWriter) writeReflectedStruct(v reflect.Value) error {
 	} else {
 		return w.WriteStringMap(scs.convertStructToStringMap(v))
 	}
-
 }
 
 // CBORMarshaler represents an object that can write itself to a CBORWriter

@@ -5,6 +5,8 @@ import (
 	"math"
 	"reflect"
 	"testing"
+
+	"gopkg.in/d4l3k/messagediff.v1"
 )
 
 func cborDecoderHarness(t *testing.T, in []byte, expected interface{}) {
@@ -14,8 +16,8 @@ func cborDecoderHarness(t *testing.T, in []byte, expected interface{}) {
 		t.Errorf("failed to decode %v: input % x, got error: %v", expected, in, err)
 		return
 	}
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("decoder returned unexpected result: want %v (%T), got %v (%T)", expected, expected, result, result)
+	if diff, equal := messagediff.PrettyDiff(result, expected); !equal {
+		t.Errorf("decoder returned unexpected result: %#v diff=%s", result, diff)
 	}
 }
 
@@ -192,6 +194,29 @@ func TestReadString(t *testing.T) {
 	}
 }
 
+func TestReadSlice(t *testing.T) {
+	testPatterns := []struct {
+		cbor  []byte
+		value []interface{}
+	}{
+		{
+			[]byte{0x83, 0x01, 0x02, 0x03},
+			[]interface{}{uint64(1), uint64(2), uint64(3)},
+		},
+		{
+			[]byte{0x83, 0x61, 0x61, 0x61, 0x62, 0x61, 0x63},
+			[]interface{}{"a", "b", "c"},
+		},
+		{
+			[]byte{0x82, 0x83, 0x61, 0x61, 0x61, 0x62, 0x61, 0x63, 0x81, 0x61, 0x61},
+			[]interface{}{[]interface{}{"a", "b", "c"}, []interface{}{"a"}},
+		},
+	}
+	for i := range testPatterns {
+		cborDecoderHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+	}
+}
+
 func TestReadStringMap(t *testing.T) {
 	testPatterns := []struct {
 		cbor  []byte
@@ -222,5 +247,54 @@ func TestReadStringMap(t *testing.T) {
 	}
 	for i := range testPatterns {
 		cborDecoderHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+	}
+}
+
+func TestReadToStruct(t *testing.T) {
+	data := []byte{0xA3, 0x61, 0x41, 0x65, 0x68, 0x65, 0x6C, 0x6C, 0x6F,
+		0x61, 0x42, 0x19, 0x04, 0xD2, 0x61, 0x43, 0xF5}
+	type A struct {
+		A string
+		B int
+		C bool
+	}
+	want := &A{
+		A: "hello",
+		B: 1234,
+		C: true,
+	}
+	got := &A{}
+	r := NewCBORReader(bytes.NewReader(data))
+	if err := r.Unmarshal(got); err != nil {
+		t.Errorf("expected nil error from unmarshal but got: %v", err)
+	}
+	if ok := reflect.DeepEqual(want, got); !ok {
+		t.Errorf("failed unmarshaling struct: want %+v, got %+v", want, got)
+	}
+	data2 := []byte{
+		0xa3, 0x61, 0x41, 0x82, 0x01, 0x02, 0x61, 0x42,
+		0x82, 0x82, 0x65, 0x48, 0x65, 0x6c, 0x6c, 0x6f,
+		0x67, 0x47, 0x72, 0xc3, 0xbc, 0x65, 0x7a, 0x69,
+		0x81, 0x63, 0xe2, 0x84, 0xa2, 0x61, 0x43, 0xa3,
+		0x61, 0x41, 0x65, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
+		0x61, 0x42, 0x19, 0x04, 0xd2, 0x61, 0x43, 0xf5,
+	}
+	type B struct {
+		A []uint64
+		B [][]string
+		C A
+	}
+	want2 := &B{
+		A: []uint64{uint64(1), uint64(2)},
+		B: [][]string{[]string{"Hello", "Grüezi"}, []string{"™"}},
+		C: *want,
+	}
+	got2 := &B{}
+	r = NewCBORReader(bytes.NewReader(data2))
+	if err := r.Unmarshal(got2); err != nil {
+		t.Errorf("expected nil error from unmarshal but got: %v", err)
+	}
+	if diff, equal := messagediff.PrettyDiff(want2, got2); !equal {
+		t.Errorf("failed unmarshaling struct, got=%+v, diff=%s", got, diff)
 	}
 }
