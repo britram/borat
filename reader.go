@@ -19,9 +19,10 @@ var (
 )
 
 type CBORReader struct {
-	in       io.Reader
-	pushback byte
-	pushed   bool
+	in           io.Reader
+	pushback     byte
+	pushed       bool
+	messageLimit uint64 // Implement a maximum message size.
 }
 
 func NewCBORReader(in io.Reader) *CBORReader {

@@ -122,6 +122,9 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]
 
 	for i, n := 0, v.NumField(); i < n; i++ {
 		fieldName := v.Type().Field(i).Name
+		if v.Type().Field(i).PkgPath != "" {
+			continue
+		}
 		fieldVal := v.Field(i)
 		out[scs.strKeyForField[fieldName]] = fieldVal.Interface()
 	}
@@ -131,14 +134,23 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]
 
 // handleSlice sets the field referenced by out to the data in in,
 // out should be a slice of some type and in should also be a []interface{}
-func handleSlice(out reflect.Value, in interface{}) {
+func (scs *structCBORSpec) handleSlice(out reflect.Value, in interface{}) {
 	if out.Kind() != reflect.Slice {
 		panic("called handleSlice on a non-slice")
 	}
-	switch out.Type().Elem().Kind() {
+	k := out.Type().Elem().Kind()
+	if k == reflect.Ptr {
+		k = out.Type().Elem().Elem().Kind()
+	}
+	// If the slice is a slice of pointers,
+	switch k {
 	case reflect.Uint64, reflect.String:
 		for i, e := range in.([]interface{}) {
 			out.Index(i).Set(reflect.ValueOf(e))
+		}
+	case reflect.Struct:
+		for i, e := range in.([]interface{}) {
+			scs.convertStringMapToStruct(e.(map[string]interface{}), out.Index(i))
 		}
 	case reflect.Slice:
 		inIter := in.([]interface{})
@@ -146,14 +158,54 @@ func handleSlice(out reflect.Value, in interface{}) {
 			slen := len(inElem.([]interface{}))
 			slice := reflect.MakeSlice(out.Type().Elem(), slen, slen)
 			out.Index(i).Set(slice)
-			handleSlice(out.Index(i), inElem)
+			scs.handleSlice(out.Index(i), inElem)
 		}
+	default:
+		panic(fmt.Sprintf("unsupported slice type: %v", k))
+	}
+}
+
+func (scs *structCBORSpec) handleArray(out reflect.Value, in interface{}) {
+	if out.Kind() != reflect.Array {
+		panic(fmt.Sprintf("called handleArray on non-array type: %v", out.Kind()))
+	}
+	switch out.Type().Elem().Kind() {
+	case reflect.Uint64, reflect.String:
+		for i, e := range in.([]interface{}) {
+			out.Index(i).Set(reflect.ValueOf(e))
+		}
+	case reflect.Uint32:
+		for i, e := range in.([]interface{}) {
+			dc := uint32(e.(uint64))
+			out.Index(i).Set(reflect.ValueOf(dc))
+		}
+	case reflect.Uint16:
+		for i, e := range in.([]interface{}) {
+			dc := uint16(e.(uint64))
+			out.Index(i).Set(reflect.ValueOf(dc))
+		}
+	case reflect.Uint8:
+		for i, e := range in.([]interface{}) {
+			dc := uint8(e.(uint64))
+			out.Index(i).Set(reflect.ValueOf(dc))
+		}
+	case reflect.Struct:
+		panic("not yet implemented")
 	}
 }
 
 func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, out reflect.Value) {
 	if scs.strKeyForField == nil {
 		panic(fmt.Sprintf("cant parse string map for struct type %s", out.Type().Name()))
+	}
+	// Allocate the pointer if we were actually given a pointer to a struct.
+	// Then we set out to the indirect of that pointer to reuse our exisitng logic.
+	if out.Kind() == reflect.Ptr {
+		out.Set(reflect.New(out.Type().Elem()))
+		out = reflect.Indirect(out)
+	}
+	if out.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("cannot convertStringMapToStruct on non-struct: %v", out.Kind()))
 	}
 	for i, n := 0, out.NumField(); i < n; i++ {
 		fieldName := out.Type().Field(i).Name
@@ -170,7 +222,12 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, o
 				slen := len(value.([]interface{}))
 				slice := reflect.MakeSlice(out.Field(i).Type(), slen, slen)
 				out.Field(i).Set(slice)
-				handleSlice(out.Field(i), value) // Handle the elements of the slice.
+				scs.handleSlice(out.Field(i), value) // Handle the elements of the slice.
+			} else if out.Field(i).Kind() == reflect.Array {
+				innerType := out.Field(i).Type().Elem()
+				arr := reflect.New(reflect.ArrayOf(len(value.([]interface{})), innerType)).Elem()
+				out.Field(i).Set(arr)
+				scs.handleArray(out.Field(i), value)
 			} else if out.Field(i).Kind() == reflect.Struct {
 				scs.convertStringMapToStruct(value.(map[string]interface{}), out.Field(i))
 			} else {

@@ -39,7 +39,7 @@ func NewCBORWriter(out io.Writer) *CBORWriter {
 	return w
 }
 
-func (w *CBORWriter) writeBasicInt(u uint, mt byte) error {
+func (w *CBORWriter) writeBasicInt(u uint64, mt byte) error {
 	var out []byte
 
 	if u < 24 {
@@ -63,18 +63,18 @@ func (w *CBORWriter) writeBasicInt(u uint, mt byte) error {
 
 // WriteTag writes a CBOR tag to the output stream. CBOR tags are used to note the semantics of the following object.
 func (w *CBORWriter) WriteTag(t CBORTag) error {
-	return w.writeBasicInt(uint(t), majorTag)
+	return w.writeBasicInt(uint64(t), majorTag)
 }
 
 // WriteInt writes an integer to the output stream.
 func (w *CBORWriter) WriteInt(i int) error {
-	var u uint
+	var u uint64
 	var mt byte
 	if i >= 0 {
-		u = uint(i)
+		u = uint64(i)
 		mt = majorUnsigned
 	} else {
-		u = uint(-1 - i)
+		u = uint64(-1 - i)
 		mt = majorNegative
 	}
 
@@ -92,7 +92,7 @@ func (w *CBORWriter) WriteFloat(f float64) error {
 }
 
 func (w *CBORWriter) writeBasicBytes(b []byte, mt byte) error {
-	if err := w.writeBasicInt(uint(len(b)), mt); err != nil {
+	if err := w.writeBasicInt(uint64(len(b)), mt); err != nil {
 		return err
 	}
 
@@ -147,7 +147,7 @@ func (w *CBORWriter) WriteNil() error {
 // WriteArray writes an arbitrary slice to the output stream. Each of the
 // elements of the array will be reflected and written as appropriate.
 func (w *CBORWriter) WriteArray(a []interface{}) error {
-	if err := w.writeBasicInt(uint(len(a)), majorArray); err != nil {
+	if err := w.writeBasicInt(uint64(len(a)), majorArray); err != nil {
 		return err
 	}
 
@@ -162,7 +162,7 @@ func (w *CBORWriter) WriteArray(a []interface{}) error {
 
 // WriteStringArray writes a slice of strings to the output stream.
 func (w *CBORWriter) WriteStringArray(a []string) error {
-	if err := w.writeBasicInt(uint(len(a)), majorArray); err != nil {
+	if err := w.writeBasicInt(uint64(len(a)), majorArray); err != nil {
 		return err
 	}
 
@@ -177,7 +177,7 @@ func (w *CBORWriter) WriteStringArray(a []string) error {
 
 // WriteIntArray writes a slice of integers to the output stream.
 func (w *CBORWriter) WriteIntArray(a []int) error {
-	if err := w.writeBasicInt(uint(len(a)), majorArray); err != nil {
+	if err := w.writeBasicInt(uint64(len(a)), majorArray); err != nil {
 		return err
 	}
 
@@ -194,7 +194,7 @@ func (w *CBORWriter) WriteIntArray(a []int) error {
 // stream. Each of the values of the map will be reflected and written as
 // appropriate.
 func (w *CBORWriter) WriteStringMap(m map[string]interface{}) error {
-	if err := w.writeBasicInt(uint(len(m)), majorMap); err != nil {
+	if err := w.writeBasicInt(uint64(len(m)), majorMap); err != nil {
 		return err
 	}
 
@@ -224,7 +224,7 @@ func (w *CBORWriter) WriteStringMap(m map[string]interface{}) error {
 // stream. Each of the values of the map will be reflected and written as
 // appropriate.
 func (w *CBORWriter) WriteIntMap(m map[int]interface{}) error {
-	if err := w.writeBasicInt(uint(len(m)), majorMap); err != nil {
+	if err := w.writeBasicInt(uint64(len(m)), majorMap); err != nil {
 		return err
 	}
 
@@ -266,9 +266,18 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		return v.Interface().(CBORMarshaler).MarshalCBOR(w)
 	}
 
+	if v.Kind() == reflect.Ptr {
+		if inner := v.Elem(); inner.IsValid() {
+			return w.Marshal(inner.Interface())
+		}
+		return fmt.Errorf("invalid pointer: %v", v)
+	}
+
 	switch v.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return w.WriteInt(int(v.Int()))
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return w.writeBasicInt(v.Uint(), majorUnsigned)
 	case reflect.Bool:
 		return w.WriteBool(v.Bool())
 	case reflect.String:
@@ -283,12 +292,16 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		case reflect.TypeOf([]int{}):
 			return w.WriteIntArray(v.Interface().([]int))
 		default:
-			return w.WriteArray(v.Interface().([]interface{}))
+			iftype := make([]interface{}, v.Len())
+			for i := 0; i < v.Len(); i++ {
+				iftype[i] = v.Index(i).Interface()
+			}
+			return w.WriteArray(iftype)
 		}
 	case reflect.Array:
 		s := make([]interface{}, v.Len())
 		for i := 0; i < v.Len(); i++ {
-			s[i] = v.Elem().Interface()
+			s[i] = v.Index(i).Interface()
 		}
 		return w.WriteArray(s)
 	case reflect.Struct:
