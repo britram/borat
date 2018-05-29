@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	ShortReadError    = errors.New("short read")
 	CBORTypeReadError = errors.New("invalid CBOR type for typed read")
 	InvalidCBORError  = errors.New("invalid CBOR")
 	// UnsupportedTypeReadError is an explicit error for types we do not support.
@@ -37,10 +36,8 @@ func (r *CBORReader) readType() (byte, error) {
 		b[0] = r.pushback
 		r.pushed = false
 	} else {
-		n, err := r.in.Read(b)
-		if n != 1 {
-			return 0, ShortReadError
-		} else if err != nil {
+		_, err := io.ReadAtLeast(r.in, b, 1)
+		if err != nil {
 			return 0, err
 		}
 	}
@@ -92,40 +89,32 @@ func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
 
 	case ct&majorMask == 24:
 		b := make([]byte, 1)
-		n, err := r.in.Read(b)
-		if n != len(b) {
-			return 0, 0, false, ShortReadError
-		} else if err != nil {
+		_, err := io.ReadAtLeast(r.in, b, 1)
+		if err != nil {
 			return 0, 0, false, err
 		}
 		u = uint64(b[0])
 
 	case ct&majorMask == 25:
 		b := make([]byte, 2)
-		n, err := r.in.Read(b)
-		if n != len(b) {
-			return 0, 0, false, ShortReadError
-		} else if err != nil {
+		_, err := io.ReadAtLeast(r.in, b, 2)
+		if err != nil {
 			return 0, 0, false, err
 		}
 		u = uint64(binary.BigEndian.Uint16(b))
 
 	case ct&majorMask == 26:
 		b := make([]byte, 4)
-		n, err := r.in.Read(b)
-		if n != len(b) {
-			return 0, 0, false, ShortReadError
-		} else if err != nil {
+		_, err := io.ReadAtLeast(r.in, b, 4)
+		if err != nil {
 			return 0, 0, false, err
 		}
 		u = uint64(binary.BigEndian.Uint32(b))
 
 	case ct&majorMask == 27:
 		b := make([]byte, 8)
-		n, err := r.in.Read(b)
-		if n != len(b) {
-			return 0, 0, false, ShortReadError
-		} else if err != nil {
+		_, err := io.ReadAtLeast(r.in, b, 8)
+		if err != nil {
 			return 0, 0, false, err
 		}
 		u = uint64(binary.BigEndian.Uint64(b))
@@ -205,10 +194,8 @@ func (r *CBORReader) ReadBytes() ([]byte, error) {
 
 	// read u bytes and return them
 	b := make([]byte, u)
-	n, err := r.in.Read(b)
-	if n != 1 {
-		return nil, ShortReadError
-	} else if err != nil {
+	_, err = io.ReadAtLeast(r.in, b, int(u))
+	if err != nil {
 		return nil, err
 	}
 
@@ -229,10 +216,8 @@ func (r *CBORReader) ReadString() (string, error) {
 
 	// read u bytes and return them as a string
 	b := make([]byte, u)
-	n, err := r.in.Read(b)
-	if uint64(n) < u {
-		return "", ShortReadError
-	} else if err != nil {
+	_, err = io.ReadAtLeast(r.in, b, int(u))
+	if err != nil {
 		return "", err
 	}
 
