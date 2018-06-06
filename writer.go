@@ -26,6 +26,7 @@ type CBORWriter struct {
 	dateTimePref DateTimePref
 	out          io.Writer
 	scsCache     map[reflect.Type]*structCBORSpec
+	regTags      map[reflect.Type]uint64
 }
 
 // NewCBORWriter creates a new CBORWriter around a given output stream
@@ -35,8 +36,19 @@ func NewCBORWriter(out io.Writer) *CBORWriter {
 		dateTimePref: DateTimePrefInt,
 		out:          out,
 		scsCache:     make(map[reflect.Type]*structCBORSpec),
+		regTags:      make(map[reflect.Type]uint64),
 	}
 	return w
+}
+
+// RegisterCBORTag adds a CBOR tag for annotating a serialized struct.
+func (w *CBORWriter) RegisterCBORTag(tag uint64, inst interface{}) error {
+	t := reflect.TypeOf(inst)
+	if _, ok := w.regTags[t]; ok {
+		return fmt.Errorf("tag %d is already registered", tag)
+	}
+	w.regTags[t] = tag
+	return nil
 }
 
 func (w *CBORWriter) writeBasicInt(u uint64, mt byte) error {
@@ -220,6 +232,38 @@ func (w *CBORWriter) WriteStringMap(m map[string]interface{}) error {
 	return nil
 }
 
+// writeTaggedStringMap writes a map where keys are optionally tagged.
+func (w *CBORWriter) writeTaggedStringMap(m map[string]TaggedElement) error {
+	if err := w.writeBasicInt(uint64(len(m)), majorMap); err != nil {
+		return err
+	}
+
+	// get sorted keys array
+	keys := make([]string, len(m))
+	i := 0
+	for k := range m {
+		keys[i] = k
+		i++
+	}
+	sort.Strings(keys)
+
+	// serialize based on ordered keys
+	for _, k := range keys {
+		if err := w.WriteString(k); err != nil {
+			return err
+		}
+		if m[k].tag != CBORTag(0) {
+			if err := w.WriteTag(m[k].tag); err != nil {
+				return err
+			}
+		}
+		if err := w.Marshal(m[k].value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // WriteIntMap writes a map keyed by integers to arbitrary types to the output
 // stream. Each of the values of the map will be reflected and written as
 // appropriate.
@@ -273,6 +317,24 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		return fmt.Errorf("invalid pointer: %v", v)
 	}
 
+	// If this is a struct we must ensure that all the fields which are interface
+	// values have the appropriate tags registered so the receiving side can decode
+	// them correctly.
+	if reflect.TypeOf(x).Kind() == reflect.Struct {
+		for i := 0; i < v.NumField(); i++ {
+			if k := v.Field(i).Kind(); k == reflect.Interface {
+				innerType := v.Field(i).Elem().Type()
+				if innerType.Kind() != reflect.Struct {
+					continue
+				}
+				fieldName := v.Type().Field(i).Name
+				if _, ok := w.regTags[innerType]; !ok {
+					return fmt.Errorf("use of unregistered type in interface value: %v in %v.%v", innerType, v.Type(), fieldName)
+				}
+			}
+		}
+	}
+
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return w.WriteInt(int(v.Int()))
@@ -308,9 +370,15 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		// treat times sepcially
 		if v.Type() == reflect.TypeOf(time.Time{}) {
 			return w.WriteTime(v.Interface().(time.Time))
-		} else {
-			return w.writeReflectedStruct(v)
 		}
+		// If this struct is tagged in the registry then we should write a cbor tag first.
+		t := v.Type()
+		if tag, ok := w.regTags[t]; ok {
+			if err := w.WriteTag(CBORTag(tag)); err != nil {
+				return err
+			}
+		}
+		return w.writeReflectedStruct(v)
 	default:
 		return fmt.Errorf("Cannot marshal objects of type %v to CBOR", v.Type())
 	}
@@ -329,9 +397,12 @@ func (w *CBORWriter) writeReflectedStruct(v reflect.Value) error {
 	// and write either an int map or a string map
 	if scs.usingIntKeys() {
 		return w.WriteIntMap(scs.convertStructToIntMap(v))
-	} else {
-		return w.WriteStringMap(scs.convertStructToStringMap(v))
 	}
+	tsm, err := scs.convertStructToStringMap(v, w.regTags)
+	if err != nil {
+		return fmt.Errorf("failed to convert struct to string map: %v", err)
+	}
+	return w.writeTaggedStringMap(tsm)
 }
 
 // CBORMarshaler represents an object that can write itself to a CBORWriter

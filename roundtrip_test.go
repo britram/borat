@@ -23,11 +23,33 @@ type One struct {
 	D []string
 	E []Two
 	F []*Two
-	//	G []ConvolutedIndirectable // TODO: issue #8
+	G ConvolutedIndirectable
 }
 
 type Two struct {
 	A string
+}
+
+func TestDirectInterface(t *testing.T) {
+	var x ConvolutedIndirectable
+	x = &Indirector{
+		I: 1,
+	}
+	buf := bytes.NewBuffer([]byte{})
+	writer := NewCBORWriter(buf)
+	writer.RegisterCBORTag(1, Indirector{})
+	reader := NewCBORReader(buf)
+	reader.RegisterCBORTag(1, Indirector{})
+	if err := writer.Marshal(x); err != nil {
+		t.Fatalf("failed to marshal interface type: %v", err)
+	}
+	var r ConvolutedIndirectable
+	if err := reader.Unmarshal(&r); err != nil {
+		t.Fatalf("failed to unmarshal interface type: %v", err)
+	}
+	if !reflect.DeepEqual(x, r) {
+		t.Errorf("got: %v, want %v", r, x)
+	}
 }
 
 func TestRoundtripStructs(t *testing.T) {
@@ -38,11 +60,13 @@ func TestRoundtripStructs(t *testing.T) {
 		D: []string{"Lorem", "Ipsum"},
 		E: []Two{Two{"First"}, Two{"Second"}, Two{"Third"}},
 		F: []*Two{&Two{"Stuff"}},
-		//		G: []ConvolutedIndirectable{&Indirector{1}},
+		G: &Indirector{1},
 	}
 	buf := bytes.NewBuffer([]byte{})
 	writer := NewCBORWriter(buf)
+	writer.RegisterCBORTag(1, Indirector{})
 	reader := NewCBORReader(buf)
+	reader.RegisterCBORTag(1, Indirector{})
 	if err := writer.Marshal(s); err != nil {
 		t.Errorf("Marshal failed: %v", err)
 	}

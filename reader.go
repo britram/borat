@@ -23,12 +23,25 @@ type CBORReader struct {
 	pushback     byte
 	pushed       bool
 	messageLimit uint64 // Implement a maximum message size.
+	regTags      map[uint64]reflect.Type
 }
 
 func NewCBORReader(in io.Reader) *CBORReader {
 	r := new(CBORReader)
 	r.in = in
+	r.regTags = make(map[uint64]reflect.Type)
 	return r
+}
+
+func (r *CBORReader) RegisterCBORTag(tag uint64, inst interface{}) error {
+	if k := reflect.TypeOf(inst).Kind(); k != reflect.Struct {
+		return fmt.Errorf("inst must be a struct, but got %v", k)
+	}
+	if _, ok := r.regTags[tag]; ok {
+		return fmt.Errorf("tag %d is already registered", tag)
+	}
+	r.regTags[tag] = reflect.TypeOf(inst)
+	return nil
 }
 
 func (r *CBORReader) readType() (byte, error) {
@@ -297,7 +310,7 @@ func (r *CBORReader) ReadIntArray() ([]int, error) {
 	return out, nil
 }
 
-func (r *CBORReader) ReadStringMap() (map[string]interface{}, error) {
+func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorMap)
 	if err != nil {
@@ -307,7 +320,7 @@ func (r *CBORReader) ReadStringMap() (map[string]interface{}, error) {
 	maplen := int(u)
 
 	// create an output value
-	out := make(map[string]interface{})
+	out := make(map[string]TaggedElement)
 
 	// now read as many key/value pairs as there should be
 	for i := 0; i < maplen; i++ {
@@ -323,15 +336,40 @@ func (r *CBORReader) ReadStringMap() (map[string]interface{}, error) {
 			ks = fmt.Sprintf("%v", k)
 		}
 
+		res := TaggedElement{
+			tag: CBORTag(0),
+		}
 		v, err := r.Read()
 		if err != nil {
 			return nil, err
 		}
+		if t, ok := v.(CBORTag); ok {
+			res.tag = t
+			iv, err := r.Read()
+			if err != nil {
+				return nil, err
+			}
+			res.value = iv
+		} else {
+			res.value = v
+		}
 
-		out[ks] = v
+		out[ks] = res
 	}
 
 	return out, nil
+}
+
+func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]interface{} {
+	out := make(map[string]interface{})
+	for k, v := range in {
+		if imap, ok := v.value.(map[string]TaggedElement); ok {
+			out[k] = r.UntagStringMap(imap)
+		} else {
+			out[k] = v.value
+		}
+	}
+	return out
 }
 
 func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
@@ -610,9 +648,8 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 			}
 			pv.Elem().Set(reflect.ValueOf(t))
 			return nil
-		} else {
-			return r.readReflectedStruct(pv.Elem())
 		}
+		return r.readReflectedStruct(pv.Elem())
 	case reflect.Bool:
 		b, err := r.Read()
 		if err != nil {
@@ -622,6 +659,27 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 		case bool:
 			pv.Elem().Set(reflect.ValueOf(b))
 		}
+	case reflect.Interface:
+		b, err := r.ReadTag()
+		if err != nil {
+			return err
+		}
+		t, ok := r.regTags[uint64(b)]
+		if !ok {
+			return fmt.Errorf("CBOR tag %d was not registered on this reader", t)
+		}
+		// Check if we can assign the type to the interface x. N.B. x is a pointer so use elem.
+		if dt := reflect.TypeOf(x).Elem(); !t.AssignableTo(dt) {
+			return fmt.Errorf("registered type %v is not assignable to %v", t, dt)
+		}
+		// Instantiate t and call unmarshal on it.
+		tins := reflect.New(t)
+		// Set x to the instantiation of t.
+		if err := r.Unmarshal(tins.Interface()); err != nil {
+			return fmt.Errorf("failed to unmarshal interface inner type %v: %v", tins.Type().Name(), err)
+		}
+		pv.Elem().Set(tins)
+		return nil
 	}
 
 	return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
@@ -642,7 +700,7 @@ func (r *CBORReader) readReflectedStruct(pv reflect.Value) error {
 		return fmt.Errorf("failed to read tag: %v", err)
 	}
 
-	var m map[string]interface{}
+	var m map[string]TaggedElement
 	switch ct & majorSelect {
 	case majorMap:
 		// Read the right kind of map depending on what the struct supports.
@@ -655,7 +713,7 @@ func (r *CBORReader) readReflectedStruct(pv reflect.Value) error {
 	case majorTag:
 		return errors.New("tagged structs are not supported yet")
 	}
-	scs.convertStringMapToStruct(m, pv)
+	scs.convertStringMapToStruct(m, pv, r.regTags)
 	return nil
 }
 
