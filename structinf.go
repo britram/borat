@@ -15,11 +15,17 @@ type structCBORSpec struct {
 	strKeyForField map[string]string
 }
 
+// TaggedElement is used to wrap elements which may be tagged for writing.
+type TaggedElement struct {
+	Tag   CBORTag
+	Value interface{}
+}
+
 func (scs *structCBORSpec) usingIntKeys() bool {
 	return scs.intKeyForField != nil
 }
 
-func (scs *structCBORSpec) learnStruct(t reflect.Type) {
+func (scs *structCBORSpec) learnStruct(t reflect.Type) error {
 	for i, n := 0, t.NumField(); i < n; i++ {
 		f := t.Field(i)
 
@@ -33,10 +39,10 @@ func (scs *structCBORSpec) learnStruct(t reflect.Type) {
 					// Integer tag; parse it
 					intKey, err := strconv.Atoi(tag[1:len(tag)])
 					if err != nil {
-						panic(fmt.Sprintf("invalid integer key tag for %s.%s", t.Name(), f.Name))
+						return fmt.Errorf("invalid integer key tag for %s.%s", t.Name(), f.Name)
 					}
 					if scs.strKeyForField != nil {
-						panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
+						return fmt.Errorf("cannot mix integer and string keys in %s", t.Name())
 					}
 					if scs.intKeyForField == nil {
 						scs.intKeyForField = make(map[string]int)
@@ -44,7 +50,7 @@ func (scs *structCBORSpec) learnStruct(t reflect.Type) {
 					scs.intKeyForField[f.Name] = intKey
 				} else {
 					if scs.intKeyForField != nil {
-						panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
+						return fmt.Errorf("cannot mix integer and string keys in %s", t.Name())
 					}
 					if scs.strKeyForField == nil {
 						scs.strKeyForField = make(map[string]string)
@@ -54,7 +60,7 @@ func (scs *structCBORSpec) learnStruct(t reflect.Type) {
 			} else {
 				// generate map key from name
 				if scs.intKeyForField != nil {
-					panic(fmt.Sprintf("cannot mix integer and string keys in %s", t.Name()))
+					return fmt.Errorf("cannot mix integer and string keys in %s", t.Name())
 				}
 				if scs.strKeyForField == nil {
 					scs.strKeyForField = make(map[string]string)
@@ -68,18 +74,19 @@ func (scs *structCBORSpec) learnStruct(t reflect.Type) {
 				// parse tag value as a base-10 int
 				ct, err := strconv.Atoi(tag)
 				if err != nil || ct < 0 {
-					panic(fmt.Sprintf("cannot parse special struct member cborTag %s in %s", tag, t.Name()))
+					return fmt.Errorf("cannot parse special struct member cborTag %s in %s", tag, t.Name())
 				}
 				scs.tag = uint(ct)
 				scs.hasTag = true
 			}
 		}
 	}
+	return nil
 }
 
-func (scs *structCBORSpec) convertStructToIntMap(v reflect.Value) map[int]interface{} {
+func (scs *structCBORSpec) convertStructToIntMap(v reflect.Value) (map[int]interface{}, error) {
 	if scs.intKeyForField == nil {
-		panic(fmt.Sprintf("can't convert %s to integer-keyed map", v.Type().Name()))
+		return nil, fmt.Errorf("can't convert %s to integer-keyed map", v.Type().Name())
 	}
 
 	out := make(map[int]interface{})
@@ -90,12 +97,12 @@ func (scs *structCBORSpec) convertStructToIntMap(v reflect.Value) map[int]interf
 		out[scs.intKeyForField[fieldName]] = fieldVal.Interface()
 	}
 
-	return out
+	return out, nil
 }
 
-func (scs *structCBORSpec) convertIntMapToStruct(in map[int]interface{}, out reflect.Value) {
+func (scs *structCBORSpec) convertIntMapToStruct(in map[int]interface{}, out reflect.Value) error {
 	if scs.intKeyForField == nil {
-		panic(fmt.Sprintf("can't parse int map for struct type %s", out.Type().Name()))
+		return fmt.Errorf("can't parse int map for struct type %s", out.Type().Name())
 	}
 
 	for i, n := 0, out.NumField(); i < n; i++ {
@@ -111,14 +118,15 @@ func (scs *structCBORSpec) convertIntMapToStruct(in map[int]interface{}, out ref
 			out.Field(i).Set(reflect.ValueOf(value))
 		}
 	}
+	return nil
 }
 
-func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]interface{} {
+func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) (map[string]TaggedElement, error) {
 	if scs.strKeyForField == nil {
-		panic(fmt.Sprintf("can't convert %s to string-keyed map", v.Type().Name()))
+		fmt.Errorf("can't convert %s to string-keyed map", v.Type().Name())
 	}
 
-	out := make(map[string]interface{})
+	out := make(map[string]TaggedElement)
 
 	for i, n := 0, v.NumField(); i < n; i++ {
 		fieldName := v.Type().Field(i).Name
@@ -126,17 +134,21 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) map[string]
 			continue
 		}
 		fieldVal := v.Field(i)
-		out[scs.strKeyForField[fieldName]] = fieldVal.Interface()
+		// Do not tag structs over here because Marshal does that.
+		elem := TaggedElement{
+			Value: fieldVal.Interface(),
+		}
+		out[scs.strKeyForField[fieldName]] = elem
 	}
 
-	return out
+	return out, nil
 }
 
 // handleSlice sets the field referenced by out to the data in in,
 // out should be a slice of some type and in should also be a []interface{}
-func (scs *structCBORSpec) handleSlice(out reflect.Value, in interface{}) {
+func (scs *structCBORSpec) handleSlice(out reflect.Value, in []interface{}, registry map[CBORTag]reflect.Type) error {
 	if out.Kind() != reflect.Slice {
-		panic("called handleSlice on a non-slice")
+		return fmt.Errorf("called handleSlice on non-slice type %T: %v", in, in)
 	}
 	k := out.Type().Elem().Kind()
 	if k == reflect.Ptr {
@@ -145,58 +157,62 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in interface{}) {
 	// If the slice is a slice of pointers,
 	switch k {
 	case reflect.Uint64, reflect.String:
-		for i, e := range in.([]interface{}) {
+		for i, e := range in {
 			out.Index(i).Set(reflect.ValueOf(e))
 		}
 	case reflect.Struct:
-		for i, e := range in.([]interface{}) {
-			scs.convertStringMapToStruct(e.(map[string]interface{}), out.Index(i))
+		for i, e := range in {
+			scs.convertStringMapToStruct(e.(map[string]TaggedElement), out.Index(i), registry)
 		}
 	case reflect.Slice:
-		inIter := in.([]interface{})
+		inIter := in
 		for i, inElem := range inIter {
 			slen := len(inElem.([]interface{}))
 			slice := reflect.MakeSlice(out.Type().Elem(), slen, slen)
 			out.Index(i).Set(slice)
-			scs.handleSlice(out.Index(i), inElem)
+			scs.handleSlice(out.Index(i), inElem.([]interface{}), registry)
 		}
 	default:
-		panic(fmt.Sprintf("unsupported slice type: %v", k))
+		return fmt.Errorf("unsupported slice type: %v", k)
 	}
+	return nil
 }
 
-func (scs *structCBORSpec) handleArray(out reflect.Value, in interface{}) {
+func (scs *structCBORSpec) handleArray(out reflect.Value, in TaggedElement) error {
 	if out.Kind() != reflect.Array {
-		panic(fmt.Sprintf("called handleArray on non-array type: %v", out.Kind()))
+		return fmt.Errorf("called handleArray on non-array type: %v", out.Kind())
 	}
 	switch out.Type().Elem().Kind() {
 	case reflect.Uint64, reflect.String:
-		for i, e := range in.([]interface{}) {
+		for i, e := range in.Value.([]interface{}) {
 			out.Index(i).Set(reflect.ValueOf(e))
 		}
 	case reflect.Uint32:
-		for i, e := range in.([]interface{}) {
+		for i, e := range in.Value.([]interface{}) {
 			dc := uint32(e.(uint64))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Uint16:
-		for i, e := range in.([]interface{}) {
+		for i, e := range in.Value.([]interface{}) {
 			dc := uint16(e.(uint64))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Uint8:
-		for i, e := range in.([]interface{}) {
+		for i, e := range in.Value.([]interface{}) {
 			dc := uint8(e.(uint64))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Struct:
-		panic("not yet implemented")
+		return fmt.Errorf("handleArray not yet implemented for type %T: %v", in.Value, in.Value)
 	}
+	return nil
 }
 
-func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, out reflect.Value) {
+// out must be a value of type struct. If the current thing is an interface then it should be
+// resolved to the actual type by the caller.
+func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement, out reflect.Value, registry map[CBORTag]reflect.Type) error {
 	if scs.strKeyForField == nil {
-		panic(fmt.Sprintf("cant parse string map for struct type %s", out.Type().Name()))
+		return fmt.Errorf("cant parse string map for struct type %s", out.Type().Name())
 	}
 	// Allocate the pointer if we were actually given a pointer to a struct.
 	// Then we set out to the indirect of that pointer to reuse our exisitng logic.
@@ -205,34 +221,53 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]interface{}, o
 		out = reflect.Indirect(out)
 	}
 	if out.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("cannot convertStringMapToStruct on non-struct: %v", out.Kind()))
+		return fmt.Errorf("cannot convertStringMapToStruct on non-struct: %v", out.Kind())
 	}
 	for i, n := 0, out.NumField(); i < n; i++ {
 		fieldName := out.Type().Field(i).Name
 		mapIdx := scs.strKeyForField[fieldName]
 		// If this is a struct we should do something special here.
-		if value, ok := in[mapIdx]; ok {
+		if elem, ok := in[mapIdx]; ok {
 			// If this field is of type int but we have a uint64, we can cast
 			// it, provided that it fits.
-			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(value).Kind() == reflect.Uint64 {
-				value = int(value.(uint64))
+			if out.Field(i).Kind() == reflect.Int && reflect.ValueOf(elem.Value).Kind() == reflect.Uint64 {
+				elem.Value = int(elem.Value.(uint64))
 			}
 			if out.Field(i).Kind() == reflect.Slice {
 				// We need to make a slice with the correct length and type.
-				slen := len(value.([]interface{}))
+				slen := len(elem.Value.([]interface{}))
 				slice := reflect.MakeSlice(out.Field(i).Type(), slen, slen)
 				out.Field(i).Set(slice)
-				scs.handleSlice(out.Field(i), value) // Handle the elements of the slice.
+				if err := scs.handleSlice(out.Field(i), elem.Value.([]interface{}), registry); err != nil {
+					return fmt.Errorf("convertStringMapToStruct failed to call handleSlice: %v", err)
+				}
 			} else if out.Field(i).Kind() == reflect.Array {
 				innerType := out.Field(i).Type().Elem()
-				arr := reflect.New(reflect.ArrayOf(len(value.([]interface{})), innerType)).Elem()
+				arr := reflect.New(reflect.ArrayOf(len(elem.Value.([]interface{})), innerType)).Elem()
 				out.Field(i).Set(arr)
-				scs.handleArray(out.Field(i), value)
+				if err := scs.handleArray(out.Field(i), elem); err != nil {
+					return fmt.Errorf("convertStringMapToStruct failed to call handleArray: %v", err)
+				}
 			} else if out.Field(i).Kind() == reflect.Struct {
-				scs.convertStringMapToStruct(value.(map[string]interface{}), out.Field(i))
+				if err := scs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), out.Field(i), registry); err != nil {
+					return fmt.Errorf("failed to convert map to struct for type %s: %v", out.Type().Name(), err)
+				}
+			} else if out.Field(i).Kind() == reflect.Interface {
+				concrete, ok := registry[elem.Tag]
+				if !ok {
+					return fmt.Errorf("unsupported tag %d", elem.Tag)
+				}
+				inst := reflect.New(concrete)
+				childScs := structCBORSpec{}
+				if err := childScs.learnStruct(concrete); err != nil {
+					return fmt.Errorf("failed to learn struct: %v", err)
+				}
+				childScs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), inst.Elem(), registry)
+				out.Field(i).Set(inst)
 			} else {
-				out.Field(i).Set(reflect.ValueOf(value))
+				out.Field(i).Set(reflect.ValueOf(elem.Value))
 			}
 		}
 	}
+	return nil
 }

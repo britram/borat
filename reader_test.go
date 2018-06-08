@@ -21,6 +21,21 @@ func cborDecoderHarness(t *testing.T, in []byte, expected interface{}) {
 	}
 }
 
+func cborDecoderUntagMapHarness(t *testing.T, in []byte, expected interface{}) {
+	r := NewCBORReader(bytes.NewReader(in))
+	result, err := r.Read()
+	if err != nil {
+		t.Errorf("failed to decode %v: input % x, got error %v", expected, in, err)
+		return
+	}
+	if m, ok := result.(map[string]TaggedElement); ok {
+		result = r.UntagStringMap(m)
+	}
+	if diff, equal := messagediff.PrettyDiff(result, expected); !equal {
+		t.Errorf("decoder returned unexpected result: %#v diff=%s", result, diff)
+	}
+}
+
 func cborDecoderHarnessExpectErr(t *testing.T, in []byte, errExpect error) {
 	r := NewCBORReader(bytes.NewReader(in))
 	if _, err := r.Read(); err != errExpect {
@@ -246,7 +261,7 @@ func TestReadStringMap(t *testing.T) {
 		},
 	}
 	for i := range testPatterns {
-		cborDecoderHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+		cborDecoderUntagMapHarness(t, testPatterns[i].cbor, testPatterns[i].value)
 	}
 }
 
