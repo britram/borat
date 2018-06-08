@@ -23,17 +23,17 @@ type CBORReader struct {
 	pushback     byte
 	pushed       bool
 	messageLimit uint64 // Implement a maximum message size.
-	regTags      map[uint64]reflect.Type
+	regTags      map[CBORTag]reflect.Type
 }
 
 func NewCBORReader(in io.Reader) *CBORReader {
 	r := new(CBORReader)
 	r.in = in
-	r.regTags = make(map[uint64]reflect.Type)
+	r.regTags = make(map[CBORTag]reflect.Type)
 	return r
 }
 
-func (r *CBORReader) RegisterCBORTag(tag uint64, inst interface{}) error {
+func (r *CBORReader) RegisterCBORTag(tag CBORTag, inst interface{}) error {
 	if k := reflect.TypeOf(inst).Kind(); k != reflect.Struct {
 		return fmt.Errorf("inst must be a struct, but got %v", k)
 	}
@@ -310,6 +310,7 @@ func (r *CBORReader) ReadIntArray() ([]int, error) {
 	return out, nil
 }
 
+// ReadStringMap reads a CBOR map type.
 func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorMap)
@@ -335,23 +336,20 @@ func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 		default:
 			ks = fmt.Sprintf("%v", k)
 		}
-
-		res := TaggedElement{
-			tag: CBORTag(0),
-		}
+		var res TaggedElement
 		v, err := r.Read()
 		if err != nil {
 			return nil, err
 		}
 		if t, ok := v.(CBORTag); ok {
-			res.tag = t
+			res.Tag = t
 			iv, err := r.Read()
 			if err != nil {
 				return nil, err
 			}
-			res.value = iv
+			res.Value = iv
 		} else {
-			res.value = v
+			res.Value = v
 		}
 
 		out[ks] = res
@@ -360,13 +358,15 @@ func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 	return out, nil
 }
 
+// UntagStringMap takes a map which contains optionally tagged elements and
+// removes the tags from the map and any nested maps recursively.
 func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]interface{} {
 	out := make(map[string]interface{})
 	for k, v := range in {
-		if imap, ok := v.value.(map[string]TaggedElement); ok {
+		if imap, ok := v.Value.(map[string]TaggedElement); ok {
 			out[k] = r.UntagStringMap(imap)
 		} else {
-			out[k] = v.value
+			out[k] = v.Value
 		}
 	}
 	return out
@@ -664,7 +664,7 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 		if err != nil {
 			return err
 		}
-		t, ok := r.regTags[uint64(b)]
+		t, ok := r.regTags[b]
 		if !ok {
 			return fmt.Errorf("CBOR tag %d was not registered on this reader", t)
 		}

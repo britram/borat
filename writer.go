@@ -26,7 +26,7 @@ type CBORWriter struct {
 	dateTimePref DateTimePref
 	out          io.Writer
 	scsCache     map[reflect.Type]*structCBORSpec
-	regTags      map[reflect.Type]uint64
+	regTags      map[reflect.Type]CBORTag
 }
 
 // NewCBORWriter creates a new CBORWriter around a given output stream
@@ -36,13 +36,13 @@ func NewCBORWriter(out io.Writer) *CBORWriter {
 		dateTimePref: DateTimePrefInt,
 		out:          out,
 		scsCache:     make(map[reflect.Type]*structCBORSpec),
-		regTags:      make(map[reflect.Type]uint64),
+		regTags:      make(map[reflect.Type]CBORTag),
 	}
 	return w
 }
 
 // RegisterCBORTag adds a CBOR tag for annotating a serialized struct.
-func (w *CBORWriter) RegisterCBORTag(tag uint64, inst interface{}) error {
+func (w *CBORWriter) RegisterCBORTag(tag CBORTag, inst interface{}) error {
 	t := reflect.TypeOf(inst)
 	if _, ok := w.regTags[t]; ok {
 		return fmt.Errorf("tag %d is already registered", tag)
@@ -252,12 +252,12 @@ func (w *CBORWriter) writeTaggedStringMap(m map[string]TaggedElement) error {
 		if err := w.WriteString(k); err != nil {
 			return err
 		}
-		if m[k].tag != CBORTag(0) {
-			if err := w.WriteTag(m[k].tag); err != nil {
+		if m[k].Tag != CBORTag(0) {
+			if err := w.WriteTag(m[k].Tag); err != nil {
 				return err
 			}
 		}
-		if err := w.Marshal(m[k].value); err != nil {
+		if err := w.Marshal(m[k].Value); err != nil {
 			return err
 		}
 	}
@@ -396,9 +396,13 @@ func (w *CBORWriter) writeReflectedStruct(v reflect.Value) error {
 
 	// and write either an int map or a string map
 	if scs.usingIntKeys() {
-		return w.WriteIntMap(scs.convertStructToIntMap(v))
+		imap, err := scs.convertStructToIntMap(v)
+		if err != nil {
+			return fmt.Errorf("failed to convert struct to int map: %v", err)
+		}
+		return w.WriteIntMap(imap)
 	}
-	tsm, err := scs.convertStructToStringMap(v, w.regTags)
+	tsm, err := scs.convertStructToStringMap(v)
 	if err != nil {
 		return fmt.Errorf("failed to convert struct to string map: %v", err)
 	}
