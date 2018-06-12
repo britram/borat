@@ -10,11 +10,15 @@ import (
 	"time"
 )
 
+// DateTimePref indicates the format for marshaling timestamps.
 type DateTimePref int
 
 const (
+	// DateTimePrefInt causes a timestamp to be encoded as an int.
 	DateTimePrefInt = iota
+	// DateTimePrefFloat causes a timestamp to be encoded as a float.
 	DateTimePrefFloat
+	// DateTimePrefString causes a timestamp to be encoded as a String.
 	DateTimePrefString
 )
 
@@ -133,6 +137,7 @@ func (w *CBORWriter) WriteBool(b bool) error {
 	return err
 }
 
+// WriteTime writes a time value to the output stream.
 func (w *CBORWriter) WriteTime(t time.Time) error {
 	switch w.dateTimePref {
 	case DateTimePrefInt:

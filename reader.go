@@ -18,6 +18,8 @@ var (
 	UnsupportedTypeReadError = errors.New("unsupported type encountered in read")
 )
 
+// CBORReader provides functionality to decode encoded CBOR to structures or to
+// manually read elements out of a byte slice.
 type CBORReader struct {
 	in           io.Reader
 	pushback     byte
@@ -26,6 +28,7 @@ type CBORReader struct {
 	regTags      map[CBORTag]reflect.Type
 }
 
+// NewCBORReader creates a new instance of the CBORReader.
 func NewCBORReader(in io.Reader) *CBORReader {
 	r := new(CBORReader)
 	r.in = in
@@ -33,6 +36,7 @@ func NewCBORReader(in io.Reader) *CBORReader {
 	return r
 }
 
+// RegisterCBORTag configures a mapping from a CBOR tag to a specific struct.
 func (r *CBORReader) RegisterCBORTag(tag CBORTag, inst interface{}) error {
 	if k := reflect.TypeOf(inst).Kind(); k != reflect.Struct {
 		return fmt.Errorf("inst must be a struct, but got %v", k)
@@ -140,6 +144,7 @@ func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
 	return u, ct, neg, nil
 }
 
+// ReadInt reads a numerical type and sets the sign accordingly.
 func (r *CBORReader) ReadInt() (int, error) {
 	var i int
 	u, _, neg, err := r.readBasicUnsigned(majorUnsigned)
@@ -157,6 +162,7 @@ func (r *CBORReader) ReadInt() (int, error) {
 	return i, nil
 }
 
+// ReadUint reads an numerical type but discards the sign information if any.
 func (r *CBORReader) ReadUint() (uint64, error) {
 	if u, _, _, err := r.readBasicUnsigned(majorUnsigned); err != nil {
 		return 0, err
@@ -165,6 +171,7 @@ func (r *CBORReader) ReadUint() (uint64, error) {
 	}
 }
 
+// ReadTag reads a CBOR tag type.
 func (r *CBORReader) ReadTag() (CBORTag, error) {
 	u, _, _, err := r.readBasicUnsigned(majorTag)
 	if err != nil {
@@ -174,6 +181,7 @@ func (r *CBORReader) ReadTag() (CBORTag, error) {
 	return CBORTag(u), nil
 }
 
+// ReadFloat reads a floating point type.
 func (r *CBORReader) ReadFloat() (float64, error) {
 	u, ct, _, err := r.readBasicUnsigned(majorOther)
 	if err != nil {
@@ -199,6 +207,7 @@ func (r *CBORReader) ReadFloat() (float64, error) {
 	return f, nil
 }
 
+// ReadBytes reads the byte array type.
 func (r *CBORReader) ReadBytes() ([]byte, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorBytes)
@@ -216,6 +225,7 @@ func (r *CBORReader) ReadBytes() ([]byte, error) {
 	return b, nil
 }
 
+// ReadString reads a string type.
 func (r *CBORReader) ReadString() (string, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorString)
@@ -238,7 +248,8 @@ func (r *CBORReader) ReadString() (string, error) {
 	return string(b), nil
 }
 
-func (r *CBORReader) ReadArray() ([]interface{}, error) {
+// ReadArray reads an arbitrary array type.
+func (r *CBORReader) ReadArray() ([]TaggedElement, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorArray)
 	if err != nil {
@@ -248,20 +259,33 @@ func (r *CBORReader) ReadArray() ([]interface{}, error) {
 	arraylen := int(u)
 
 	// create an output value
-	out := make([]interface{}, arraylen)
+	out := make([]TaggedElement, arraylen)
 
 	// now read that many values
 	for i := 0; i < arraylen; i++ {
+		var elem TaggedElement
 		v, err := r.Read()
 		if err != nil {
 			return nil, err
 		}
-		out[i] = v
+		if tag, ok := v.(CBORTag); ok {
+			// The thing we have read here is a CBOR tag, so we have to read again to get the tagged element.
+			te, err := r.Read()
+			if err != nil {
+				return nil, err
+			}
+			elem.Tag = tag
+			elem.Value = te
+		} else {
+			elem.Value = v
+		}
+		out[i] = elem
 	}
 
 	return out, nil
 }
 
+// ReadStringArray reads an array of strings.
 func (r *CBORReader) ReadStringArray() ([]string, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorArray)
@@ -286,6 +310,7 @@ func (r *CBORReader) ReadStringArray() ([]string, error) {
 	return out, nil
 }
 
+// ReadIntArray reads an array of integers.
 func (r *CBORReader) ReadIntArray() ([]int, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorArray)
@@ -359,12 +384,15 @@ func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 }
 
 // UntagStringMap takes a map which contains optionally tagged elements and
-// removes the tags from the map and any nested maps recursively.
+// removes the tags from the map and any nested maps recursively. Also supports
+// nested arrays.
 func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]interface{} {
 	out := make(map[string]interface{})
 	for k, v := range in {
 		if imap, ok := v.Value.(map[string]TaggedElement); ok {
 			out[k] = r.UntagStringMap(imap)
+		} else if iarr, ok := v.Value.([]TaggedElement); ok {
+			out[k] = r.UntagArray(iarr)
 		} else {
 			out[k] = v.Value
 		}
@@ -372,6 +400,23 @@ func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]inte
 	return out
 }
 
+// UntagArray takes an array containing optionally tagged elements and removes those
+// tags recursively. Also supports nested maps.
+func (r *CBORReader) UntagArray(in []TaggedElement) []interface{} {
+	out := make([]interface{}, len(in))
+	for i, v := range in {
+		if iarr, ok := v.Value.([]TaggedElement); ok {
+			out[i] = r.UntagArray(iarr)
+		} else if imap, ok := v.Value.(map[string]TaggedElement); ok {
+			out[i] = r.UntagStringMap(imap)
+		} else {
+			out[i] = v.Value
+		}
+	}
+	return out
+}
+
+// ReadIntMap reads an integer keyed map.
 func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 	// read length
 	u, _, _, err := r.readBasicUnsigned(majorArray)
@@ -402,6 +447,7 @@ func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 	return out, nil
 }
 
+// ReadTime reads a timestamp.
 func (r *CBORReader) ReadTime() (time.Time, error) {
 	// Case 1: the time is just a float, integer, or string.
 	// In this case we just treat it as if it were tagged.
@@ -422,9 +468,8 @@ func (r *CBORReader) ReadTime() (time.Time, error) {
 			secs := int64(whole)
 			ns := int64(frac * 10e9)
 			return time.Unix(secs, ns), nil
-		} else {
-			return time.Unix(0, 0), fmt.Errorf("got malformed majorOther type for timestamp: %x", ct)
 		}
+		return time.Unix(0, 0), fmt.Errorf("got malformed majorOther type for timestamp: %x", ct)
 	case majorNegative:
 		fallthrough
 	case majorUnsigned:
@@ -448,7 +493,7 @@ func (r *CBORReader) ReadTime() (time.Time, error) {
 	case majorTag:
 		break // Fall through to the tag logic below.
 	default:
-		return time.Unix(0, 0), fmt.Errorf("Unsupported tag for parsing time: %v", ct&majorMask)
+		return time.Unix(0, 0), fmt.Errorf("unsupported tag for parsing time: %v", ct&majorMask)
 	}
 	tag, err := r.ReadTag()
 	if err != nil {
@@ -498,10 +543,10 @@ func (r *CBORReader) ReadTime() (time.Time, error) {
 				return time.Unix(0, 0), fmt.Errorf("got malformed majorOther type for timestamp: %x", ct)
 			}
 		default:
-			return time.Unix(0, 0), fmt.Errorf("Timestamp not understood.")
+			return time.Unix(0, 0), fmt.Errorf("timestamp not understood")
 		}
 	default:
-		return time.Unix(0, 0), fmt.Errorf("Unrecognized time tag")
+		return time.Unix(0, 0), fmt.Errorf("unrecognized time tag")
 	}
 }
 
@@ -638,7 +683,7 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 			return nil
 		}
 	case reflect.Array:
-		return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+		return fmt.Errorf("cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
 	case reflect.Struct:
 		// treat times sepcially
 		if pv.Elem().Type() == reflect.TypeOf(time.Time{}) {
@@ -682,7 +727,7 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 		return nil
 	}
 
-	return fmt.Errorf("Cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
+	return fmt.Errorf("cannot unmarshal objects of type %v from CBOR", pv.Type().Elem())
 }
 
 // readReflectedStruct attempts to deserialize a map from the reader that
@@ -713,8 +758,7 @@ func (r *CBORReader) readReflectedStruct(pv reflect.Value) error {
 	case majorTag:
 		return errors.New("tagged structs are not supported yet")
 	}
-	scs.convertStringMapToStruct(m, pv, r.regTags)
-	return nil
+	return scs.convertStringMapToStruct(m, pv, r.regTags)
 }
 
 type CBORUnmarshaler interface {

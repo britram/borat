@@ -21,7 +21,7 @@ func cborDecoderHarness(t *testing.T, in []byte, expected interface{}) {
 	}
 }
 
-func cborDecoderUntagMapHarness(t *testing.T, in []byte, expected interface{}) {
+func cborDecoderUntagHarness(t *testing.T, in []byte, expected interface{}) {
 	r := NewCBORReader(bytes.NewReader(in))
 	result, err := r.Read()
 	if err != nil {
@@ -30,6 +30,8 @@ func cborDecoderUntagMapHarness(t *testing.T, in []byte, expected interface{}) {
 	}
 	if m, ok := result.(map[string]TaggedElement); ok {
 		result = r.UntagStringMap(m)
+	} else if a, ok := result.([]TaggedElement); ok {
+		result = r.UntagArray(a)
 	}
 	if diff, equal := messagediff.PrettyDiff(result, expected); !equal {
 		t.Errorf("decoder returned unexpected result: %#v diff=%s", result, diff)
@@ -228,7 +230,7 @@ func TestReadSlice(t *testing.T) {
 		},
 	}
 	for i := range testPatterns {
-		cborDecoderHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+		cborDecoderUntagHarness(t, testPatterns[i].cbor, testPatterns[i].value)
 	}
 }
 
@@ -261,7 +263,7 @@ func TestReadStringMap(t *testing.T) {
 		},
 	}
 	for i := range testPatterns {
-		cborDecoderUntagMapHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+		cborDecoderUntagHarness(t, testPatterns[i].cbor, testPatterns[i].value)
 	}
 }
 
