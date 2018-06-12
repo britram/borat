@@ -384,7 +384,8 @@ func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 }
 
 // UntagStringMap takes a map which contains optionally tagged elements and
-// removes the tags from the map and any nested maps recursively.
+// removes the tags from the map and any nested maps recursively. Also supports
+// nested arrays.
 func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]interface{} {
 	out := make(map[string]interface{})
 	for k, v := range in {
@@ -399,6 +400,8 @@ func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]inte
 	return out
 }
 
+// UntagArray takes an array containing optionally tagged elements and removes those
+// tags recursively. Also supports nested maps.
 func (r *CBORReader) UntagArray(in []TaggedElement) []interface{} {
 	out := make([]interface{}, len(in))
 	for i, v := range in {
