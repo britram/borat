@@ -123,7 +123,7 @@ func (scs *structCBORSpec) convertIntMapToStruct(in map[int]interface{}, out ref
 
 func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) (map[string]TaggedElement, error) {
 	if scs.strKeyForField == nil {
-		fmt.Errorf("can't convert %s to string-keyed map", v.Type().Name())
+		return nil, fmt.Errorf("can't convert %s to string-keyed map", v.Type().Name())
 	}
 
 	out := make(map[string]TaggedElement)
@@ -146,7 +146,7 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) (map[string
 
 // handleSlice sets the field referenced by out to the data in in,
 // out should be a slice of some type and in should also be a []interface{}
-func (scs *structCBORSpec) handleSlice(out reflect.Value, in []interface{}, registry map[CBORTag]reflect.Type) error {
+func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, registry map[CBORTag]reflect.Type) error {
 	if out.Kind() != reflect.Slice {
 		return fmt.Errorf("called handleSlice on non-slice type %T: %v", in, in)
 	}
@@ -158,19 +158,38 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in []interface{}, regi
 	switch k {
 	case reflect.Uint64, reflect.String:
 		for i, e := range in {
-			out.Index(i).Set(reflect.ValueOf(e))
+			out.Index(i).Set(reflect.ValueOf(e.Value))
 		}
 	case reflect.Struct:
 		for i, e := range in {
-			scs.convertStringMapToStruct(e.(map[string]TaggedElement), out.Index(i), registry)
+			scs.convertStringMapToStruct(e.Value.(map[string]TaggedElement), out.Index(i), registry)
 		}
 	case reflect.Slice:
-		inIter := in
-		for i, inElem := range inIter {
-			slen := len(inElem.([]interface{}))
+		for i, inElem := range in {
+			slen := len(inElem.Value.([]TaggedElement))
 			slice := reflect.MakeSlice(out.Type().Elem(), slen, slen)
 			out.Index(i).Set(slice)
-			scs.handleSlice(out.Index(i), inElem.([]interface{}), registry)
+			scs.handleSlice(out.Index(i), inElem.Value.([]TaggedElement), registry)
+		}
+	case reflect.Interface:
+		for i, inElem := range in {
+			te, ok := inElem.Value.(map[string]TaggedElement)
+			if !ok {
+				return fmt.Errorf("idx %d: expected in parameter to be array of maps but got: %T: %v", i, inElem, inElem)
+			}
+			st, ok := registry[inElem.Tag]
+			if !ok {
+				return fmt.Errorf("tag %v not found in registry", inElem.Tag)
+			}
+			inst := reflect.New(st)
+			childScs := structCBORSpec{}
+			if err := childScs.learnStruct(st); err != nil {
+				return err
+			}
+			if err := childScs.convertStringMapToStruct(te, inst.Elem(), registry); err != nil {
+				return err
+			}
+			out.Index(i).Set(inst)
 		}
 	default:
 		return fmt.Errorf("unsupported slice type: %v", k)
@@ -184,22 +203,22 @@ func (scs *structCBORSpec) handleArray(out reflect.Value, in TaggedElement) erro
 	}
 	switch out.Type().Elem().Kind() {
 	case reflect.Uint64, reflect.String:
-		for i, e := range in.Value.([]interface{}) {
-			out.Index(i).Set(reflect.ValueOf(e))
+		for i, e := range in.Value.([]TaggedElement) {
+			out.Index(i).Set(reflect.ValueOf(e.Value))
 		}
 	case reflect.Uint32:
-		for i, e := range in.Value.([]interface{}) {
-			dc := uint32(e.(uint64))
+		for i, e := range in.Value.([]TaggedElement) {
+			dc := uint32(e.Value.(uint64))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Uint16:
-		for i, e := range in.Value.([]interface{}) {
-			dc := uint16(e.(uint64))
+		for i, e := range in.Value.([]TaggedElement) {
+			dc := uint16(e.Value.(uint64))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Uint8:
-		for i, e := range in.Value.([]interface{}) {
-			dc := uint8(e.(uint64))
+		for i, e := range in.Value.([]TaggedElement) {
+			dc := uint8(e.Value.(uint64))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Struct:
@@ -235,15 +254,15 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 			}
 			if out.Field(i).Kind() == reflect.Slice {
 				// We need to make a slice with the correct length and type.
-				slen := len(elem.Value.([]interface{}))
+				slen := len(elem.Value.([]TaggedElement))
 				slice := reflect.MakeSlice(out.Field(i).Type(), slen, slen)
 				out.Field(i).Set(slice)
-				if err := scs.handleSlice(out.Field(i), elem.Value.([]interface{}), registry); err != nil {
+				if err := scs.handleSlice(out.Field(i), elem.Value.([]TaggedElement), registry); err != nil {
 					return fmt.Errorf("convertStringMapToStruct failed to call handleSlice: %v", err)
 				}
 			} else if out.Field(i).Kind() == reflect.Array {
 				innerType := out.Field(i).Type().Elem()
-				arr := reflect.New(reflect.ArrayOf(len(elem.Value.([]interface{})), innerType)).Elem()
+				arr := reflect.New(reflect.ArrayOf(len(elem.Value.([]TaggedElement)), innerType)).Elem()
 				out.Field(i).Set(arr)
 				if err := scs.handleArray(out.Field(i), elem); err != nil {
 					return fmt.Errorf("convertStringMapToStruct failed to call handleArray: %v", err)

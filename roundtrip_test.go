@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"reflect"
 	"testing"
+
+	"gopkg.in/d4l3k/messagediff.v1"
 )
 
 type ConvolutedIndirectable interface {
@@ -30,6 +32,7 @@ type One struct {
 	E []Two
 	F []*Two
 	G ConvolutedIndirectable
+	H []ConvolutedIndirectable
 }
 
 type Two struct {
@@ -85,12 +88,13 @@ func TestRoundtripStructs(t *testing.T) {
 		E: []Two{Two{"First"}, Two{"Second"}, Two{"Third"}},
 		F: []*Two{&Two{"Stuff"}},
 		G: &Indirector{1},
+		H: []ConvolutedIndirectable{&Indirector{21}, &Indirector{31}},
 	}
 	buf := bytes.NewBuffer([]byte{})
 	writer := NewCBORWriter(buf)
-	writer.RegisterCBORTag(1, Indirector{})
+	writer.RegisterCBORTag(0xbb, Indirector{})
 	reader := NewCBORReader(buf)
-	reader.RegisterCBORTag(1, Indirector{})
+	reader.RegisterCBORTag(0xbb, Indirector{})
 	if err := writer.Marshal(s); err != nil {
 		t.Errorf("Marshal failed: %v", err)
 	}
@@ -98,7 +102,7 @@ func TestRoundtripStructs(t *testing.T) {
 	if err := reader.Unmarshal(&e); err != nil {
 		t.Errorf("Unmarshal failed: %v", err)
 	}
-	if !reflect.DeepEqual(e, s) {
-		t.Errorf("structs differ: got %v, want %v", e, s)
+	if diff, ok := messagediff.PrettyDiff(e, s); !ok {
+		t.Errorf("structs differ, diff: %v", diff)
 	}
 }
