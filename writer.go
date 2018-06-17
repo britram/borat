@@ -168,7 +168,30 @@ func (w *CBORWriter) WriteArray(a []interface{}) error {
 		return err
 	}
 
+	writeTags := false
+	outer := reflect.ValueOf(a).Type()
+	oKind := outer.Kind()
+	if oKind != reflect.Array && oKind != reflect.Slice {
+		return fmt.Errorf("unspoorted argument: want only array or slice but got %v", oKind)
+	}
+	iKind := outer.Elem().Kind()
+	if iKind == reflect.Interface {
+		writeTags = true
+	}
+
 	for i := range a {
+		if writeTags {
+			iType := reflect.ValueOf(a[i]).Type()
+			if iType.Kind() == reflect.Ptr {
+				iType = iType.Elem()
+			}
+			if _, ok := w.regTags[iType]; !ok {
+				return fmt.Errorf("the type %v was not found in the tag registry", iType)
+			}
+			// Note that we don't actually write the tag here because marshal will do it
+			// for us, but we still have to check here whether the tag is there or not
+			// because marshal does not know if it is an interface slice we here or not.
+		}
 		if err := w.Marshal(a[i]); err != nil {
 			return err
 		}
