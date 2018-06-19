@@ -151,18 +151,21 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, re
 		return fmt.Errorf("called handleSlice on non-slice type %T: %v", in, in)
 	}
 	k := out.Type().Elem().Kind()
+	t := out.Type().Elem()
 	if k == reflect.Ptr {
 		k = out.Type().Elem().Elem().Kind()
+		t = out.Type().Elem().Elem()
 	}
-	// If the slice is a slice of pointers,
 	switch k {
 	case reflect.Uint64, reflect.String:
 		for i, e := range in {
 			out.Index(i).Set(reflect.ValueOf(e.Value))
 		}
 	case reflect.Struct:
+		childScs := &structCBORSpec{}
+		childScs.learnStruct(t)
 		for i, e := range in {
-			scs.convertStringMapToStruct(e.Value.(map[string]TaggedElement), out.Index(i), registry)
+			childScs.convertStringMapToStruct(e.Value.(map[string]TaggedElement), out.Index(i), registry)
 		}
 	case reflect.Slice:
 		for i, inElem := range in {
@@ -268,7 +271,9 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 					return fmt.Errorf("convertStringMapToStruct failed to call handleArray: %v", err)
 				}
 			} else if out.Field(i).Kind() == reflect.Struct {
-				if err := scs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), out.Field(i), registry); err != nil {
+				childScs := structCBORSpec{}
+				childScs.learnStruct(out.Field(i).Type())
+				if err := childScs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), out.Field(i), registry); err != nil {
 					return fmt.Errorf("failed to convert map to struct for type %s: %v", out.Type().Name(), err)
 				}
 			} else if out.Field(i).Kind() == reflect.Interface {
@@ -284,8 +289,22 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 				childScs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), inst.Elem(), registry)
 				out.Field(i).Set(inst)
 			} else {
-				out.Field(i).Set(reflect.ValueOf(elem.Value))
+				val := reflect.ValueOf(elem.Value)
+				fmt.Printf("Field %s: out kind is: %v\n", out.Type().Field(i).Name, out.Field(i).Kind())
+				// Check assignability
+				inType := val.Type()
+				outType := out.Field(i).Type()
+				if inType.AssignableTo(outType) {
+					out.Field(i).Set(val)
+				} else if inType.ConvertibleTo(outType) {
+					converted := val.Convert(outType)
+					out.Field(i).Set(converted)
+				} else {
+					return fmt.Errorf("could not assign %v to %v", inType, outType)
+				}
 			}
+		} else {
+			fmt.Printf("WARNING, field %s not found on struct: %s\n", fieldName, out.Type().Name())
 		}
 	}
 	return nil

@@ -8,6 +8,8 @@ import (
 	"gopkg.in/d4l3k/messagediff.v1"
 )
 
+type IntTypedef uint8
+
 type ConvolutedIndirectable interface {
 	ConvolutedIndirection() int
 }
@@ -33,6 +35,7 @@ type One struct {
 	F []*Two
 	G ConvolutedIndirectable
 	H []ConvolutedIndirectable
+	I IntTypedef
 }
 
 type Two struct {
@@ -89,12 +92,17 @@ func TestRoundtripStructs(t *testing.T) {
 		F: []*Two{&Two{"Stuff"}},
 		G: &Indirector{1},
 		H: []ConvolutedIndirectable{&Indirector{21}, &Indirector{31}},
+		I: IntTypedef(32),
 	}
 	buf := bytes.NewBuffer([]byte{})
 	writer := NewCBORWriter(buf)
+	writer.RegisterCBORTag(0xaa, Two{})
 	writer.RegisterCBORTag(0xbb, Indirector{})
+	writer.RegisterCBORTag(0xcc, uint8(0))
 	reader := NewCBORReader(buf)
+	reader.RegisterCBORTag(0xaa, Two{})
 	reader.RegisterCBORTag(0xbb, Indirector{})
+	reader.RegisterCBORTag(0xcc, uint8(0))
 	if err := writer.Marshal(s); err != nil {
 		t.Errorf("Marshal failed: %v", err)
 	}
