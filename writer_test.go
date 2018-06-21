@@ -79,7 +79,9 @@ func TestWriteArray(t *testing.T) {
 	for i := range testPatterns {
 		m := func(in interface{}, out *bytes.Buffer) {
 			w := borat.NewCBORWriter(out)
-			w.WriteArray(in.([]interface{}))
+			if err := w.WriteArray(in.([]interface{})); err != nil {
+				t.Errorf("writeArray failed: %v", err)
+			}
 		}
 		cborTestHarness(t, testPatterns[i].value, testPatterns[i].cbor, m)
 	}
