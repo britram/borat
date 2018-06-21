@@ -90,19 +90,21 @@ func TestRoundtripStructs(t *testing.T) {
 		D: []string{"Lorem", "Ipsum"},
 		E: []Two{Two{"First"}, Two{"Second"}, Two{"Third"}},
 		F: []*Two{&Two{"Stuff"}},
-		G: &Indirector{1},
+		G: Indirector{1},
 		H: []ConvolutedIndirectable{&Indirector{21}, &Indirector{31}},
 		I: IntTypedef(32),
 	}
 	buf := bytes.NewBuffer([]byte{})
 	writer := NewCBORWriter(buf)
 	writer.RegisterCBORTag(0xaa, Two{})
-	writer.RegisterCBORTag(0xbb, Indirector{})
+	writer.RegisterCBORTag(0xbb, &Indirector{})
 	writer.RegisterCBORTag(0xcc, uint8(0))
+	writer.RegisterCBORTag(0xdd, Indirector{})
 	reader := NewCBORReader(buf)
 	reader.RegisterCBORTag(0xaa, Two{})
-	reader.RegisterCBORTag(0xbb, Indirector{})
+	reader.RegisterCBORTag(0xbb, &Indirector{})
 	reader.RegisterCBORTag(0xcc, uint8(0))
+	reader.RegisterCBORTag(0xdd, Indirector{})
 	if err := writer.Marshal(s); err != nil {
 		t.Errorf("Marshal failed: %v", err)
 	}

@@ -168,30 +168,7 @@ func (w *CBORWriter) WriteArray(a []interface{}) error {
 		return err
 	}
 
-	writeTags := false
-	outer := reflect.ValueOf(a).Type()
-	oKind := outer.Kind()
-	if oKind != reflect.Array && oKind != reflect.Slice {
-		return fmt.Errorf("unspoorted argument: want only array or slice but got %v", oKind)
-	}
-	iKind := outer.Elem().Kind()
-	if iKind == reflect.Interface {
-		writeTags = true
-	}
-
 	for i := range a {
-		if writeTags {
-			iType := reflect.ValueOf(a[i]).Type()
-			if iType.Kind() == reflect.Ptr {
-				iType = iType.Elem()
-			}
-			if _, ok := w.regTags[iType]; !ok {
-				return fmt.Errorf("the type %v was not found in the tag registry", iType)
-			}
-			// Note that we don't actually write the tag here because marshal will do it
-			// for us, but we still have to check here whether the tag is there or not
-			// because marshal does not know if it is an interface slice we here or not.
-		}
 		if err := w.Marshal(a[i]); err != nil {
 			return err
 		}
@@ -345,6 +322,10 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		return fmt.Errorf("invalid pointer: %v", v)
 	}
 
+	if v.Kind() == reflect.Interface {
+		panic(fmt.Sprintf("this is an interface: %v", v.Type().Name()))
+	}
+
 	// If this is a struct we must ensure that all the fields which are interface
 	// values have the appropriate tags registered so the receiving side can decode
 	// them correctly.
@@ -352,14 +333,19 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		for i := 0; i < v.NumField(); i++ {
 			if k := v.Field(i).Kind(); k == reflect.Interface {
 				innerType := v.Field(i).Elem().Type()
-				if innerType.Kind() != reflect.Struct {
-					continue
-				}
 				fieldName := v.Type().Field(i).Name
 				if _, ok := w.regTags[innerType]; !ok {
 					return fmt.Errorf("use of unregistered type in interface value: %v in %v.%v", innerType, v.Type(), fieldName)
 				}
 			}
+		}
+	}
+
+	// If this object is tagged in the registry then we should write a cbor tag first.
+	t := v.Type()
+	if tag, ok := w.regTags[t]; ok {
+		if err := w.WriteTag(CBORTag(tag)); err != nil {
+			return err
 		}
 	}
 
@@ -398,13 +384,6 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		// treat times sepcially
 		if v.Type() == reflect.TypeOf(time.Time{}) {
 			return w.WriteTime(v.Interface().(time.Time))
-		}
-		// If this struct is tagged in the registry then we should write a cbor tag first.
-		t := v.Type()
-		if tag, ok := w.regTags[t]; ok {
-			if err := w.WriteTag(CBORTag(tag)); err != nil {
-				return err
-			}
 		}
 		return w.writeReflectedStruct(v)
 	default:

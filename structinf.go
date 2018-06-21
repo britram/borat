@@ -148,7 +148,7 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) (map[string
 // out should be a slice of some type and in should also be a []interface{}
 func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, registry map[CBORTag]reflect.Type) error {
 	if out.Kind() != reflect.Slice {
-		return fmt.Errorf("called handleSlice on non-slice type %T: %v", in, in)
+		return fmt.Errorf("called handleSlice on non-slice type %v: %v", out.Type().Name(), in)
 	}
 	k := out.Type().Elem().Kind()
 	t := out.Type().Elem()
@@ -160,6 +160,12 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, re
 	case reflect.Uint64, reflect.String:
 		for i, e := range in {
 			out.Index(i).Set(reflect.ValueOf(e.Value))
+		}
+	case reflect.Uint8:
+		u8t := reflect.TypeOf(uint8(0))
+		for i, e := range in {
+			val := reflect.ValueOf(e.Value)
+			out.Index(i).Set(val.Convert(u8t))
 		}
 	case reflect.Struct:
 		childScs := &structCBORSpec{}
@@ -279,18 +285,61 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 			} else if out.Field(i).Kind() == reflect.Interface {
 				concrete, ok := registry[elem.Tag]
 				if !ok {
-					return fmt.Errorf("unsupported tag %d", elem.Tag)
+					return fmt.Errorf("field: %s, unsupported tag %d, type %v", fieldName, elem.Tag, out.Type().Name())
 				}
 				inst := reflect.New(concrete)
-				childScs := structCBORSpec{}
-				if err := childScs.learnStruct(concrete); err != nil {
-					return fmt.Errorf("failed to learn struct: %v", err)
+				if concrete.Kind() == reflect.Struct {
+					childScs := structCBORSpec{}
+					if err := childScs.learnStruct(concrete); err != nil {
+						return fmt.Errorf("failed to learn struct: %v", err)
+					}
+					if err := childScs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), inst.Elem(), registry); err != nil {
+						return err
+					}
+				} else if concrete.Kind() == reflect.Slice {
+					// If the type is directly assignable then just assign it.
+					val := reflect.ValueOf(elem.Value)
+					if inst.Kind() == reflect.Ptr && val.Kind() != reflect.Ptr {
+						inst = inst.Elem()
+					}
+					if val.Type().AssignableTo(inst.Type()) {
+						inst.Set(val)
+					} else if val.Type().ConvertibleTo(inst.Type()) {
+						conv := val.Convert(inst.Type())
+						inst.Set(conv)
+					} else {
+						iter, ok := elem.Value.([]TaggedElement)
+						if !ok {
+							return fmt.Errorf("recieved type was not a slice, it was a %T", elem.Value)
+						}
+						inst = reflect.MakeSlice(concrete, len(iter), len(iter))
+						if err := scs.handleSlice(inst, iter, registry); err != nil {
+							return fmt.Errorf("failed to handleSlice: %v", err)
+						}
+					}
+				} else {
+					val := reflect.ValueOf(elem.Value)
+					if inst.Kind() == reflect.Ptr && val.Kind() != reflect.Ptr {
+						inst = inst.Elem()
+					}
+					// Check assignability
+					inType := val.Type()
+					outType := inst.Type()
+					if inType.AssignableTo(outType) {
+						inst.Set(val)
+					} else if inType.ConvertibleTo(outType) {
+						converted := val.Convert(outType)
+						inst.Set(converted)
+					} else {
+						return fmt.Errorf("could not assign %v to %v", inType, outType)
+					}
 				}
-				childScs.convertStringMapToStruct(elem.Value.(map[string]TaggedElement), inst.Elem(), registry)
+				if inst.Kind() == reflect.Ptr {
+					inst = inst.Elem()
+				}
 				out.Field(i).Set(inst)
 			} else {
 				val := reflect.ValueOf(elem.Value)
-				fmt.Printf("Field %s: out kind is: %v\n", out.Type().Field(i).Name, out.Field(i).Kind())
 				// Check assignability
 				inType := val.Type()
 				outType := out.Field(i).Type()
@@ -304,7 +353,7 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 				}
 			}
 		} else {
-			fmt.Printf("WARNING, field %s not found on struct: %s\n", fieldName, out.Type().Name())
+			return fmt.Errorf("field %s not found on struct: %s", fieldName, out.Type().Name())
 		}
 	}
 	return nil
