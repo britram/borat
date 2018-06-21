@@ -345,6 +345,10 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		return fmt.Errorf("invalid pointer: %v", v)
 	}
 
+	if v.Kind() == reflect.Interface {
+		panic(fmt.Sprintf("this is an interface: %v", v.Type().Name()))
+	}
+
 	// If this is a struct we must ensure that all the fields which are interface
 	// values have the appropriate tags registered so the receiving side can decode
 	// them correctly.
@@ -352,14 +356,19 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		for i := 0; i < v.NumField(); i++ {
 			if k := v.Field(i).Kind(); k == reflect.Interface {
 				innerType := v.Field(i).Elem().Type()
-				if innerType.Kind() != reflect.Struct {
-					continue
-				}
 				fieldName := v.Type().Field(i).Name
 				if _, ok := w.regTags[innerType]; !ok {
 					return fmt.Errorf("use of unregistered type in interface value: %v in %v.%v", innerType, v.Type(), fieldName)
 				}
 			}
+		}
+	}
+
+	// If this object is tagged in the registry then we should write a cbor tag first.
+	t := v.Type()
+	if tag, ok := w.regTags[t]; ok {
+		if err := w.WriteTag(CBORTag(tag)); err != nil {
+			return err
 		}
 	}
 
@@ -398,13 +407,6 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 		// treat times sepcially
 		if v.Type() == reflect.TypeOf(time.Time{}) {
 			return w.WriteTime(v.Interface().(time.Time))
-		}
-		// If this struct is tagged in the registry then we should write a cbor tag first.
-		t := v.Type()
-		if tag, ok := w.regTags[t]; ok {
-			if err := w.WriteTag(CBORTag(tag)); err != nil {
-				return err
-			}
 		}
 		return w.writeReflectedStruct(v)
 	default:

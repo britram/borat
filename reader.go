@@ -38,9 +38,6 @@ func NewCBORReader(in io.Reader) *CBORReader {
 
 // RegisterCBORTag configures a mapping from a CBOR tag to a specific struct.
 func (r *CBORReader) RegisterCBORTag(tag CBORTag, inst interface{}) error {
-	if k := reflect.TypeOf(inst).Kind(); k != reflect.Struct {
-		return fmt.Errorf("inst must be a struct, but got %v", k)
-	}
 	if _, ok := r.regTags[tag]; ok {
 		return fmt.Errorf("tag %d is already registered", tag)
 	}
