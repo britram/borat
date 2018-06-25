@@ -159,12 +159,50 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, re
 	switch k {
 	case reflect.Uint64, reflect.String:
 		for i, e := range in {
-			out.Index(i).Set(reflect.ValueOf(e.Value))
+			val := reflect.ValueOf(e.Value)
+			if e.Tag != CBORTag(0) {
+				t, ok := registry[e.Tag]
+				if !ok {
+					return fmt.Errorf("unknown tag %d", e.Tag)
+				}
+				if !val.Type().ConvertibleTo(t) {
+					return fmt.Errorf("%v not convertible to tag type %v", val.Type(), t)
+				}
+				out.Index(i).Set(val.Convert(t))
+			} else {
+				out.Index(i).Set(reflect.ValueOf(e.Value))
+			}
+		}
+	case reflect.Int:
+		it := reflect.TypeOf(int(0))
+		for i, e := range in {
+			val := reflect.ValueOf(e.Value)
+			if e.Tag != CBORTag(0) {
+				t, ok := registry[e.Tag]
+				if !ok {
+					return fmt.Errorf("unknown tag %d", e.Tag)
+				}
+				if !val.Type().ConvertibleTo(t) {
+					return fmt.Errorf("%v not convertible to tag type %v", val.Type(), t)
+				}
+				it = t
+			}
+			out.Index(i).Set(val.Convert(it))
 		}
 	case reflect.Uint8:
 		u8t := reflect.TypeOf(uint8(0))
 		for i, e := range in {
 			val := reflect.ValueOf(e.Value)
+			if e.Tag != CBORTag(0) {
+				t, ok := registry[e.Tag]
+				if !ok {
+					return fmt.Errorf("unknown tag %d", e.Tag)
+				}
+				if !val.Type().ConvertibleTo(t) {
+					return fmt.Errorf("%v not convertible to tag type %v", val.Type(), t)
+				}
+				u8t = t
+			}
 			out.Index(i).Set(val.Convert(u8t))
 		}
 	case reflect.Struct:
@@ -188,7 +226,7 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, re
 			}
 			st, ok := registry[inElem.Tag]
 			if !ok {
-				return fmt.Errorf("tag %v not found in registry", inElem.Tag)
+				return fmt.Errorf("tag %v not found in registry, value: %v", inElem.Tag, inElem.Value)
 			}
 			inst := reflect.New(st)
 			childScs := structCBORSpec{}
@@ -353,7 +391,7 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 				}
 			}
 		} else {
-			return fmt.Errorf("field %s not found on struct: %s", fieldName, out.Type().Name())
+			return fmt.Errorf("CBOR map does not contain field %s for struct %s, input: %v", fieldName, out.Type().Name(), in)
 		}
 	}
 	return nil
