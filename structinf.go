@@ -205,6 +205,12 @@ func (scs *structCBORSpec) handleSlice(out reflect.Value, in []TaggedElement, re
 			}
 			out.Index(i).Set(val.Convert(u8t))
 		}
+	case reflect.Uint8:
+		u8t := reflect.TypeOf(uint8(0))
+		for i, e := range in {
+			val := reflect.ValueOf(e.Value)
+			out.Index(i).Set(val.Convert(u8t))
+		}
 	case reflect.Struct:
 		childScs := &structCBORSpec{}
 		childScs.learnStruct(t)
