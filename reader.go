@@ -734,7 +734,9 @@ func (r *CBORReader) readReflectedStruct(pv reflect.Value) error {
 		return fmt.Errorf("readReflectedStruct wants only structs, got: %v", pv.Kind())
 	}
 	scs := structCBORSpec{}
-	scs.learnStruct(pv.Type())
+	if err := scs.learnStruct(pv.Type()); err != nil {
+		return fmt.Errorf("failed to learnStruct: %v", err)
+	}
 
 	// Either read a string map or an int map or a tag.
 	ct, err := r.readType()
