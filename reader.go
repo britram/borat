@@ -22,8 +22,8 @@ var (
 // manually read elements out of a byte slice.
 type CBORReader struct {
 	in           io.Reader
-	pushback     byte
-	pushed       bool
+	pushback     []byte
+	pushed       uint
 	messageLimit uint64 // Implement a maximum message size.
 	regTags      map[CBORTag]reflect.Type
 }
@@ -47,22 +47,22 @@ func (r *CBORReader) RegisterCBORTag(tag CBORTag, inst interface{}) error {
 
 func (r *CBORReader) readType() (byte, error) {
 	b := make([]byte, 1)
-	if r.pushed {
-		b[0] = r.pushback
-		r.pushed = false
+	if r.pushed > 0 {
+		b[0] = r.pushback[0]
+		r.pushback = r.pushback[1:]
+		r.pushed--
 	} else {
 		_, err := io.ReadAtLeast(r.in, b, 1)
 		if err != nil {
 			return 0, err
 		}
 	}
-
 	return b[0], nil
 }
 
 func (r *CBORReader) pushbackType(pushback byte) {
-	r.pushback = pushback
-	r.pushed = true
+	r.pushback = append(r.pushback, pushback)
+	r.pushed++
 }
 
 func (r *CBORReader) readBasicUnsigned(mt byte) (uint64, byte, bool, error) {
@@ -628,7 +628,18 @@ func (r *CBORReader) Read() (interface{}, error) {
 		return r.ReadArray()
 	case majorMap:
 		r.pushbackType(ct)
-		return r.ReadIntMap()
+		// When we are reading a map it can either be a int map or a string map.
+		// To know which variant we are dealing with, we sample the first key
+		// and use that to decide which variant parser to call.
+		it, err := r.readType()
+		if err != nil {
+			return nil, err
+		}
+		r.pushbackType(it)
+		if it&majorSelect == majorUnsigned {
+			return r.ReadIntMap()
+		}
+		return r.ReadStringMap()
 	case majorTag:
 		r.pushbackType(ct)
 		return r.ReadTag()
