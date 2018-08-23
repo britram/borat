@@ -311,8 +311,8 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 	v := reflect.ValueOf(x)
 
 	// if the type implements marshaler, just do that
-	if v.Type().Implements(reflect.TypeOf((*CBORMarshaler)(nil)).Elem()) {
-		return v.Interface().(CBORMarshaler).MarshalCBOR(w)
+	if m, ok := x.(CBORMarshaler); ok {
+		return m.MarshalCBOR(w)
 	}
 
 	if v.Kind() == reflect.Ptr {
@@ -324,21 +324,6 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 
 	if v.Kind() == reflect.Interface {
 		panic(fmt.Sprintf("this is an interface: %v", v.Type().Name()))
-	}
-
-	// If this is a struct we must ensure that all the fields which are interface
-	// values have the appropriate tags registered so the receiving side can decode
-	// them correctly.
-	if reflect.TypeOf(x).Kind() == reflect.Struct {
-		for i := 0; i < v.NumField(); i++ {
-			if k := v.Field(i).Kind(); k == reflect.Interface {
-				innerType := v.Field(i).Elem().Type()
-				fieldName := v.Type().Field(i).Name
-				if _, ok := w.regTags[innerType]; !ok {
-					return fmt.Errorf("use of unregistered type in interface value: %v in %v.%v", innerType, v.Type(), fieldName)
-				}
-			}
-		}
 	}
 
 	// If this object is tagged in the registry then we should write a cbor tag first.

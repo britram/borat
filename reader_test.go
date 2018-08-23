@@ -263,7 +263,16 @@ func TestReadStringMap(t *testing.T) {
 		},
 	}
 	for i := range testPatterns {
-		cborDecoderUntagHarness(t, testPatterns[i].cbor, testPatterns[i].value)
+		r := NewCBORReader(bytes.NewReader(testPatterns[i].cbor))
+		result, err := r.ReadStringMap()
+		if err != nil {
+			t.Errorf("failed to decode %v: input % x, got error %v", testPatterns[i].value, testPatterns[i].cbor, err)
+			return
+		}
+		untagged := r.UntagStringMap(result)
+		if diff, equal := messagediff.PrettyDiff(untagged, testPatterns[i].value); !equal {
+			t.Errorf("decoder returned unexpected result: %#v diff=%s", result, diff)
+		}
 	}
 }
 
