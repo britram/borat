@@ -380,14 +380,32 @@ func (r *CBORReader) ReadStringMap() (map[string]TaggedElement, error) {
 	return out, nil
 }
 
+func (r *CBORReader) UntagIntMap(in map[int]TaggedElement) map[int]interface{} {
+	out := make(map[int]interface{})
+	for k, v := range in {
+		if imap, ok := v.Value.(map[int]TaggedElement); ok {
+			out[k] = r.UntagIntMap(imap)
+		} else if smap, ok := v.Value.(map[string]TaggedElement); ok {
+			out[k] = r.UntagStringMap(smap)
+		} else if arr, ok := v.Value.([]TaggedElement); ok {
+			out[k] = r.UntagArray(arr)
+		} else {
+			out[k] = v.Value
+		}
+	}
+	return out
+}
+
 // UntagStringMap takes a map which contains optionally tagged elements and
 // removes the tags from the map and any nested maps recursively. Also supports
 // nested arrays.
 func (r *CBORReader) UntagStringMap(in map[string]TaggedElement) map[string]interface{} {
 	out := make(map[string]interface{})
 	for k, v := range in {
-		if imap, ok := v.Value.(map[string]TaggedElement); ok {
-			out[k] = r.UntagStringMap(imap)
+		if smap, ok := v.Value.(map[string]TaggedElement); ok {
+			out[k] = r.UntagStringMap(smap)
+		} else if imap, ok := v.Value.(map[int]TaggedElement); ok {
+			out[k] = r.UntagIntMap(imap)
 		} else if iarr, ok := v.Value.([]TaggedElement); ok {
 			out[k] = r.UntagArray(iarr)
 		} else {
@@ -404,8 +422,10 @@ func (r *CBORReader) UntagArray(in []TaggedElement) []interface{} {
 	for i, v := range in {
 		if iarr, ok := v.Value.([]TaggedElement); ok {
 			out[i] = r.UntagArray(iarr)
-		} else if imap, ok := v.Value.(map[string]TaggedElement); ok {
-			out[i] = r.UntagStringMap(imap)
+		} else if smap, ok := v.Value.(map[string]TaggedElement); ok {
+			out[i] = r.UntagStringMap(smap)
+		} else if imap, ok := v.Value.(map[int]TaggedElement); ok {
+			out[i] = r.UntagIntMap(imap)
 		} else {
 			out[i] = v.Value
 		}
@@ -413,10 +433,18 @@ func (r *CBORReader) UntagArray(in []TaggedElement) []interface{} {
 	return out
 }
 
+func (r *CBORReader) ReadIntMapUntagged() (map[int]interface{}, error) {
+	m, err := r.ReadIntMap()
+	if err != nil {
+		return nil, err
+	}
+	return r.UntagIntMap(m), nil
+}
+
 // ReadIntMap reads an integer keyed map.
-func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
+func (r *CBORReader) ReadIntMap() (map[int]TaggedElement, error) {
 	// read length
-	u, _, _, err := r.readBasicUnsigned(majorArray)
+	u, _, _, err := r.readBasicUnsigned(majorMap)
 	if err != nil {
 		return nil, err
 	}
@@ -424,7 +452,7 @@ func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 	maplen := int(u)
 
 	// create an output value
-	out := make(map[int]interface{})
+	out := make(map[int]TaggedElement)
 
 	// now read as many key/value pairs as there should be
 	for i := 0; i < maplen; i++ {
@@ -433,12 +461,25 @@ func (r *CBORReader) ReadIntMap() (map[int]interface{}, error) {
 			return nil, err
 		}
 
+		var res TaggedElement
+
 		v, err := r.Read()
 		if err != nil {
 			return nil, err
 		}
 
-		out[k] = v
+		if t, ok := v.(CBORTag); ok {
+			inner, err := r.Read()
+			if err != nil {
+				return nil, err
+			}
+			res.Tag = t
+			res.Value = inner
+		} else {
+			res.Value = v
+		}
+
+		out[k] = res
 	}
 
 	return out, nil
@@ -587,7 +628,7 @@ func (r *CBORReader) Read() (interface{}, error) {
 		return r.ReadArray()
 	case majorMap:
 		r.pushbackType(ct)
-		return r.ReadStringMap()
+		return r.ReadIntMap()
 	case majorTag:
 		r.pushbackType(ct)
 		return r.ReadTag()
@@ -614,7 +655,6 @@ func (r *CBORReader) Read() (interface{}, error) {
 // CBORTypeReadError if the type does not match or cannot be made to match.
 // Values are handled as in Marshal().
 func (r *CBORReader) Unmarshal(x interface{}) error {
-
 	pv := reflect.ValueOf(x)
 
 	// make sure we have a pointer to a thing
@@ -622,9 +662,9 @@ func (r *CBORReader) Unmarshal(x interface{}) error {
 		return fmt.Errorf("cannot unmarshal CBOR to non-pointer type %v", pv.Type())
 	}
 
-	// if the type implements unmarshaler, just do that
-	if pv.Type().Elem().Implements(reflect.TypeOf((*CBORMarshaler)(nil)).Elem()) {
-		return pv.Elem().Interface().(CBORUnmarshaler).UnmarshalCBOR(r)
+	// if the type implements unmarshaler, just do that.
+	if m, ok := x.(CBORUnmarshaler); ok {
+		return m.UnmarshalCBOR(r)
 	}
 
 	// make sure the thing is settable
