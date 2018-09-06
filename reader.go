@@ -627,7 +627,6 @@ func (r *CBORReader) Read() (interface{}, error) {
 		r.pushbackType(ct)
 		return r.ReadArray()
 	case majorMap:
-		r.pushbackType(ct)
 		// When we are reading a map it can either be a int map or a string map.
 		// To know which variant we are dealing with, we sample the first key
 		// and use that to decide which variant parser to call.
@@ -635,6 +634,7 @@ func (r *CBORReader) Read() (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
+		r.pushbackType(ct)
 		r.pushbackType(it)
 		if it&majorSelect == majorUnsigned {
 			return r.ReadIntMap()
