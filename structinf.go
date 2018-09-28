@@ -134,6 +134,12 @@ func (scs *structCBORSpec) convertStructToStringMap(v reflect.Value) (map[string
 			continue
 		}
 		fieldVal := v.Field(i)
+		// If it is a zero field, then do not include it in the map.
+		// We do it this way to also catch if it is a nil pointer,
+		// since the pointer kind is not invalid but it's inner value is.
+		if reflect.ValueOf(fieldVal.Interface()).Kind() == reflect.Invalid {
+			continue
+		}
 		// Do not tag structs over here because Marshal does that.
 		elem := TaggedElement{
 			Value: fieldVal.Interface(),
@@ -391,7 +397,7 @@ func (scs *structCBORSpec) convertStringMapToStruct(in map[string]TaggedElement,
 				}
 			}
 		} else {
-			return fmt.Errorf("CBOR map does not contain field %s for struct %s, input: %v", fieldName, out.Type().Name(), in)
+			// Do nothing if this field does was not specified in the map.
 		}
 	}
 	return nil

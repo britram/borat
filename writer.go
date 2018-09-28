@@ -327,10 +327,13 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 	}
 
 	// If this object is tagged in the registry then we should write a cbor tag first.
-	t := v.Type()
-	if tag, ok := w.regTags[t]; ok {
-		if err := w.WriteTag(CBORTag(tag)); err != nil {
-			return err
+	// Only do this if the value is non zero.
+	if x != nil && !reflect.DeepEqual(x, reflect.Zero(reflect.TypeOf(x)).Interface()) {
+		t := v.Type()
+		if tag, ok := w.regTags[t]; ok {
+			if err := w.WriteTag(CBORTag(tag)); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -371,8 +374,10 @@ func (w *CBORWriter) Marshal(x interface{}) error {
 			return w.WriteTime(v.Interface().(time.Time))
 		}
 		return w.writeReflectedStruct(v)
+	case reflect.Invalid:
+		return fmt.Errorf("Trying to marshal Invalid: %v", v)
 	default:
-		return fmt.Errorf("Cannot marshal objects of type %v to CBOR", v.Type())
+		return fmt.Errorf("Cannot marshal objects of kind %v to CBOR", v.Kind())
 	}
 }
 

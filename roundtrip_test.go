@@ -42,6 +42,20 @@ type Two struct {
 	A string
 }
 
+func TestEmptyStruct(t *testing.T) {
+	inpt := One{}
+	buf := bytes.NewBuffer([]byte{})
+	writer := NewCBORWriter(buf)
+	if err := writer.Marshal(&inpt); err != nil {
+		t.Errorf("expected no error marshaling empty struct: %v", err)
+	}
+	out := One{}
+	reader := NewCBORReader(buf)
+	if err := reader.Unmarshal(&out); err != nil {
+		t.Errorf("expected no error unmarshaling empty struct but got: %v", err)
+	}
+}
+
 func TestDirectInterface(t *testing.T) {
 	var x ConvolutedIndirectable
 	x = &Indirector{
