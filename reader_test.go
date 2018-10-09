@@ -2,12 +2,36 @@ package borat
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"reflect"
 	"testing"
 
 	"gopkg.in/d4l3k/messagediff.v1"
 )
+
+type UnmarshalablePtr struct {
+	a int
+}
+
+func (u *UnmarshalablePtr) UnmarshalCBOR(r *CBORReader) error {
+	fmt.Printf("called our thing")
+	a, err := r.ReadInt()
+	if err != nil {
+		return fmt.Errorf("expected no error but got: %v", err)
+	}
+	u.a = a
+	return nil
+}
+
+func TestUnmarshalable(t *testing.T) {
+	b := []byte{0x18, 0x7b}
+	var dst UnmarshalablePtr
+	r := NewCBORReader(bytes.NewReader(b))
+	if err := r.Unmarshal(&dst); err != nil {
+		t.Fatalf("expected no error unmarshaling but got %v", err)
+	}
+}
 
 func cborDecoderHarness(t *testing.T, in []byte, expected interface{}) {
 	r := NewCBORReader(bytes.NewReader(in))
