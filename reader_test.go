@@ -76,43 +76,43 @@ func TestReadInt(t *testing.T) {
 	}{
 		{
 			[]byte{0x01},
-			uint64(1),
+			1,
 		},
 		{
 			[]byte{0x0a},
-			uint64(10),
+			10,
 		},
 		{
 			[]byte{0x17},
-			uint64(23),
+			23,
 		},
 		{
 			[]byte{0x18, 0x18},
-			uint64(24),
+			24,
 		},
 		{
 			[]byte{0x18, 0x19},
-			uint64(25),
+			25,
 		},
 		{
 			[]byte{0x18, 0x64},
-			uint64(100),
+			100,
 		},
 		{
 			[]byte{0x19, 0x03, 0xe8},
-			uint64(1000),
+			1000,
 		},
 		{
 			[]byte{0x1a, 0x00, 0x0f, 0x42, 0x40},
-			uint64(1000000),
+			1000000,
 		},
 		{
 			[]byte{0x1b, 0x00, 0x00, 0x00, 0xe8, 0xd4, 0xa5, 0x10, 0x00},
-			uint64(1000000000000),
+			1000000000000,
 		},
 		{
-			[]byte{0x1b, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
-			uint64(18446744073709551615),
+			[]byte{0x1b, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+			9223372036854775807,
 		},
 		{
 			[]byte{0x20},
@@ -242,7 +242,7 @@ func TestReadSlice(t *testing.T) {
 	}{
 		{
 			[]byte{0x83, 0x01, 0x02, 0x03},
-			[]interface{}{uint64(1), uint64(2), uint64(3)},
+			[]interface{}{1, 2, 3},
 		},
 		{
 			[]byte{0x83, 0x61, 0x61, 0x61, 0x62, 0x61, 0x63},
@@ -266,23 +266,23 @@ func TestReadStringMap(t *testing.T) {
 		{
 			[]byte{0xA1, 0x61, 0x31, 0x01},
 			map[string]interface{}{
-				"1": uint64(1),
+				"1": 1,
 			},
 		},
 		{
 			[]byte{0xA2, 0x61, 0x31, 0x0A, 0x61, 0x32, 0x19, 0x0C, 0x45},
 			map[string]interface{}{
-				"1": uint64(10),
-				"2": uint64(3141),
+				"1": 10,
+				"2": 3141,
 			},
 		},
 		{
 			[]byte{0xA3, 0x61, 0x31, 0x0A, 0x61, 0x32, 0x62, 0x68, 0x69, 0x61,
 				0x33, 0x83, 0x01, 0x02, 0x62, 0xC3, 0x9C},
 			map[string]interface{}{
-				"1": uint64(10),
+				"1": 10,
 				"2": "hi",
-				"3": []interface{}{uint64(1), uint64(2), "Ü"},
+				"3": []interface{}{1, 2, "Ü"},
 			},
 		},
 	}
@@ -330,12 +330,12 @@ func TestReadToStruct(t *testing.T) {
 		0x61, 0x42, 0x19, 0x04, 0xd2, 0x61, 0x43, 0xf5,
 	}
 	type B struct {
-		A []uint64
+		A []int
 		B [][]string
 		C A
 	}
 	want2 := &B{
-		A: []uint64{uint64(1), uint64(2)},
+		A: []int{1, 2},
 		B: [][]string{[]string{"Hello", "Grüezi"}, []string{"™"}},
 		C: *want,
 	}

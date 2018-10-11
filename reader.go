@@ -611,10 +611,7 @@ func (r *CBORReader) Read() (interface{}, error) {
 	}
 
 	switch ct & majorSelect {
-	case majorUnsigned:
-		r.pushbackType(ct)
-		return r.ReadUint()
-	case majorNegative:
+	case majorUnsigned, majorNegative:
 		r.pushbackType(ct)
 		return r.ReadInt()
 	case majorBytes:

@@ -261,17 +261,17 @@ func (scs *structCBORSpec) handleArray(out reflect.Value, in TaggedElement) erro
 		}
 	case reflect.Uint32:
 		for i, e := range in.Value.([]TaggedElement) {
-			dc := uint32(e.Value.(uint64))
+			dc := uint32(e.Value.(int))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Uint16:
 		for i, e := range in.Value.([]TaggedElement) {
-			dc := uint16(e.Value.(uint64))
+			dc := uint16(e.Value.(int))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Uint8:
 		for i, e := range in.Value.([]TaggedElement) {
-			dc := uint8(e.Value.(uint64))
+			dc := uint8(e.Value.(int))
 			out.Index(i).Set(reflect.ValueOf(dc))
 		}
 	case reflect.Struct:
